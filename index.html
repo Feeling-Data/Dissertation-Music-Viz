@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Music Archive Visualization</title>
+  <style>
+    body { background: #0a0a0a; margin: 0; }
+    /* Optional: Style for tooltip */
+    .custom-tooltip {
+      position: absolute;
+      background: #111;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: sans-serif;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 10;
+      transition: opacity 0.2s;
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="sliding-ambiguity-text"
+     style="
+       position:absolute;
+       left:150px; top:110px;
+       pointer-events:none;
+       width:370px; height:32px;
+       overflow:visible;
+       z-index:15;
+       display:none;">
+  <div id="sliding-inner"
+       style="
+         position:relative;
+         left:-370px; /* Start off-screen */
+         font-family:'Inter',sans-serif;
+         font-size:16.5px;
+         color:#ffe083;
+         font-style:italic;
+         opacity:0.86;
+         text-shadow: 0 2px 18px #000;
+         transition: left 0.85s cubic-bezier(0.6,0,0.28,1);">
+      (Something is uncertain here… the category “music” has no further detail.)
+  </div>
+</div>
+
+  <div id="category-stats"
+       style="
+         position:absolute;
+         top:190px;
+         right:50px;
+         width:400px;
+         background:rgba(10,18,30,0.92);
+         color:#b6e3ef;
+         border:1.5px solid #22e0ff;
+         border-radius:20px;
+         padding:18px 20px 16px 20px;
+         font-family:'Inter',sans-serif;
+         font-size:20px;
+         z-index:2000;
+         display:none;
+            background:rgba(10,18,30,0.92);color:#b6e3ef;
+            border:1.5px solid #22e0ff; border-radius:20px; padding:18px 20px 16px 20px;
+            font-family:Inter,sans-serif; font-size:20px; z-index:2000; display:none;">
+</div>
+
+  <div id="vis"></div>
+  <div id="tooltip" class="custom-tooltip"></div>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
