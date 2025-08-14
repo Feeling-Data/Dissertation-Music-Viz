@@ -272,6 +272,10 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           .attr("transform", `translate(0, ${i * (capsuleHeight + capsuleSpacing)})`)
           .on("click", () => {
             selectedCategory = category;
+            // broadcast selection to the other window
+            console.log("Broadcasting category:", selectedCategory); // debug
+            localStorage.setItem("vizCategory", selectedCategory || "");
+            localStorage.setItem("vizType2", ""); // clear type2 when picking a new category
 
             const stats = getCategoryStats(category, filtered);
             if (stats) {
@@ -354,6 +358,10 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           .attr("transform", `translate(0, ${(i+1) * (type2CapsuleHeight + type2CapsuleSpacing)})`)
           .on("click", () => {
             selectedType2 = type2;
+            // broadcast selection to the other window
+            console.log("Broadcasting type2:", selectedType2); // debug
+            localStorage.setItem("vizType2", selectedType2 || "");
+
 
             if (selectedType2 && selectedType2.toLowerCase().trim() === "music") {
               d3.select("#sliding-ambiguity-text").style("display","block");
@@ -520,17 +528,32 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     updateScrubberUI();
   }
 
-  // Receive updates from the other window
 window.addEventListener("storage", (e) => {
-  // If I'm interacting, ignore incoming sync so my click/drag wins
-  if (isScrubbingManually) return;
+  // For debugging
+  console.log("Storage event:", e.key, "->", e.newValue);
 
+  // Time sync
   if (e.key === "vizTime") {
     const m = parseFloat(e.newValue);
-    if (!isNaN(m) && m !== scrubMonth) applySyncedTime(m);
+    if (!isNaN(m) && m !== scrubMonth) {
+      applySyncedTime(m);
+    }
+  }
+
+  // Category sync
+  if (e.key === "vizCategory") {
+    selectedCategory = e.newValue || null;
+    console.log("Received category:", selectedCategory);
+    updateCategoryHighlight(); // Force redraw instantly
+  }
+
+  // Type2 sync
+  if (e.key === "vizType2") {
+    selectedType2 = e.newValue || null;
+    console.log("Received type2:", selectedType2);
+    updateCategoryHighlight(); // Force redraw instantly
   }
 });
-
 
 
   scrubberGroup.on("mousedown", function(event){
@@ -589,6 +612,27 @@ window.addEventListener("storage", (e) => {
 
   // Animation
   let maxMonthSeen = 0;
+
+function updateCategoryHighlightSingle(d) {
+  const flicker = d.flicker && !d.hasFallen
+    ? 0.4 + 0.4 * Math.abs(Math.sin(performance.now() / d.flickerSpeed + d.phase))
+    : 1;
+  let match = true;
+  if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
+  if (selectedType2) match = d.type2 === selectedType2;
+  let opacity = flicker * d.baseOpacity * (match ? 1 : 0.1);
+  if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
+  if (selectedPoint === d) opacity = 3;
+  return opacity;
+}
+
+function updateCategoryHighlight() {
+  dots
+    .attr("fill-opacity", d => updateCategoryHighlightSingle(d))
+    .attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+}
+
+
 
   function animate(now) {
     const t = now - lastResetTime;
@@ -686,7 +730,11 @@ window.addEventListener("storage", (e) => {
         if (selectedPoint === d) opacity = 3;
         return opacity;
       })
+      .attr("fill-opacity", d => updateCategoryHighlightSingle(d))
       .attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+
+
+
 
     lines
       .attr("x1", d => d.source._drawX)
