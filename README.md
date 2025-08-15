@@ -16,3 +16,30 @@ scrubberGroup.on("mousedown", function(event){
   setScrub(d3.pointer(event, this)[0]);
   event.preventDefault();
 });
+
+
+scrubberGroup.on("mousedown", function(event){
+  dragging = true;
+  isScrubbingManually = true;
+  lastResetTime = performance.now(); // critical
+  setScrub(d3.pointer(event, this)[0]);
+  event.preventDefault();
+});
+
+
+d3.select(window).on("mousemove", (event) => {
+  if (dragging) {
+    setScrub(d3.pointer(event, scrubberGroup.node())[0]);
+  }
+});
+
+
+d3.select(window).on("mouseup", () => {
+  if (dragging) {
+    dragging = false;
+    isScrubbingManually = false;
+    const now = performance.now();
+    const elapsedSeconds = (now - lastResetTime) / 1000;
+    offsetMonths = scrubMonth - elapsedSeconds * speed;
+  }
+});
