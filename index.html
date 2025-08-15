@@ -1,116 +1,136 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Music Archive Visualization</title>
 
-  <!-- Base + split styles -->
-  <style>
-    html, body {
-      margin: 0;
-      overflow: hidden;           /* hide the other half */
-      background: #0a0a0a;
-      height: 100%;
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Music Archive Visualization</title>
 
-    /* The clipped window that shows exactly one screen (1080px) */
-    #viewport {
-      width: 1920px;
-      height: 1080px;             /* one screen */
-      overflow: hidden;
-      transform-origin: top left; /* for scaling */
-      position: absolute;         /* we’ll center via JS */
-      left: 0; top: 0;
-    }
+    <!-- Base + split styles -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        overflow: hidden;
+        /* hide the other half */
+        background: #0a0a0a;
+        height: 100%;
+      }
 
-    /* Bottom view: show the lower half by shifting the full 2160px SVG up by 1080px */
-    body.bottom #viewport svg {
-      transform: translateY(-1080px);
-      transform-origin: top left;
-    }
-  </style>
+      /* The clipped window that shows exactly one screen (1080px) */
+      #viewport {
+        width: 1920px;
+        height: 1080px;
+        /* one screen */
+        overflow: hidden;
+        transform-origin: top left;
+        /* for scaling */
+        position: absolute;
+        /* we’ll center via JS */
+        left: 0;
+        top: 0;
+      }
 
-  <!-- Tooltip & UI styles from your page (kept) -->
-  <style>
-    .custom-tooltip {
-      background: rgba(0,0,0,0.85);
-      border-radius: 6px;
-      color: white;
-      padding: 10px;
-      font-family: 'Inter', sans-serif;
-      font-size: 13px;
-      pointer-events: none;
-      position: absolute;
-      z-index: 999;
-      max-width: 220px;
-      border: 1px solid white;
-      box-shadow: 0 0 10px rgba(255,255,255,0.15);
-      opacity: 0; /* default hidden; you set via JS */
-      transition: opacity 0.2s;
-    }
-    .tooltip-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #444;
-      margin-bottom: 6px;
-    }
-    .tooltip-header img { width: 17px; height: 17px; filter: brightness(1.2); }
-    .tooltip-title { font-weight: bold; margin-left: auto; font-size: 13px; }
-    .tooltip-content div { margin: 2px 0; }
-  </style>
-</head>
+      /* Bottom view: show the lower half by shifting the full 2160px SVG up by 1080px */
+      body.bottom #viewport svg {
+        transform: translateY(-1080px);
+        transform-origin: top left;
+      }
+    </style>
 
-<body>
-  <!-- The clipped window every screen shows -->
-  <div id="viewport"></div>
+    <!-- Tooltip & UI styles from your page (kept) -->
+    <style>
+      .custom-tooltip {
+        background: rgba(0, 0, 0, 0.85);
+        border-radius: 6px;
+        color: white;
+        padding: 10px;
+        font-family: 'Inter', sans-serif;
+        font-size: 13px;
+        pointer-events: none;
+        position: absolute;
+        z-index: 999;
+        max-width: 220px;
+        border: 1px solid white;
+        box-shadow: 0 0 10px rgba(255, 255, 255, 0.15);
+        opacity: 0;
+        /* default hidden; you set via JS */
+        transition: opacity 0.2s;
+      }
 
-  <!-- Sliding note (kept from your code) -->
-  <div id="sliding-ambiguity-text"
-       style="position:absolute; left:250px; top:80px; pointer-events:none; width:370px; height:32px;
+      .tooltip-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid #444;
+        margin-bottom: 6px;
+      }
+
+      .tooltip-header img {
+        width: 17px;
+        height: 17px;
+        filter: brightness(1.2);
+      }
+
+      .tooltip-title {
+        font-weight: bold;
+        margin-left: auto;
+        font-size: 13px;
+      }
+
+      .tooltip-content div {
+        margin: 2px 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- The clipped window every screen shows -->
+    <div id="viewport"></div>
+
+    <!-- Sliding note (kept from your code) -->
+    <div id="sliding-ambiguity-text" style="position:absolute; left:210px; top:80px; pointer-events:none; width:370px; height:32px;
               overflow:visible; z-index:15; display:none;">
-    <div id="sliding-inner"
-         style="position:relative; left:-370px; font-family:'Inter',sans-serif; font-size:16.5px;
+      <div id="sliding-inner" style="position:relative; left:-370px; font-family:'Inter',sans-serif; font-size:16.5px;
                 color:#ffe083; font-style:italic; opacity:0.86; text-shadow:0 2px 18px #000;
                 transition:left 0.85s cubic-bezier(0.6,0,0.28,1);">
-      (Something is uncertain here… the category “music” has no further detail.)
+        (Something is uncertain here… the category “music” has no further detail.)
+      </div>
     </div>
-  </div>
 
-  <!-- Category stats panel (kept) -->
-  <div id="category-stats"
-       style="position: fixed; top: 180px; right: 160px; width: 300px; background: rgba(10,18,30,0.92);
+    <!-- Category stats panel (kept) -->
+    <div id="category-stats" style="position: fixed; top: 180px; right: 130px; width: 300px; background: rgba(10,18,30,0.92);
               color: #b6e3ef; border: 1.5px solid #22e0ff; border-radius: 20px; padding: 18px 20px 16px 20px;
               font-family: 'Inter', sans-serif; font-size: 15px; z-index: 2000; display: none;
               overflow-y: auto; max-height: 90vh;">
-  </div>
-
-  <!-- (Optional legacy containers — safe to leave; SVG goes into #viewport now) -->
-  <div id="layout">
-    <div id="capsules"></div>
-    <div id="vis"></div>
-  </div>
-
-  <!-- Tooltip -->
-  <div id="tooltip" class="custom-tooltip">
-    <div class="tooltip-header">
-      <img src="assets/icons/icons8-close-window-50-2.png" />
-      <img src="assets/icons/icons8-maximize-window-50-2.png" />
-      <img src="assets/icons/icons8-minimize-window-50-2.png" />
-      <span class="tooltip-title">punkhardcore.com</span>
     </div>
-    <div class="tooltip-content">
-      <div><strong>Genre:</strong> Punk Rock | Music</div>
-      <div><strong>First seen:</strong> Jan 2006</div>
-      <div><strong>Last seen:</strong> Aug 2018</div>
-      <div><strong>Lifespan:</strong> 12.7 years</div>
-    </div>
-  </div>
 
-  <!-- Scripts -->
-  <script src="https://d3js.org/d3.v7.min.js"></script>
-  <script src="script.js"></script>
-</body>
+    <!-- (Optional legacy containers — safe to leave; SVG goes into #viewport now) -->
+    <div id="layout">
+      <div id="capsules"></div>
+      <div id="vis"></div>
+    </div>
+
+    <!-- Tooltip -->
+    <div id="tooltip" class="custom-tooltip">
+      <div class="tooltip-header">
+        <img src="assets/icons/icons8-close-window-50-2.png" />
+        <img src="assets/icons/icons8-maximize-window-50-2.png" />
+        <img src="assets/icons/icons8-minimize-window-50-2.png" />
+        <span class="tooltip-title">punkhardcore.com</span>
+      </div>
+      <div class="tooltip-content">
+        <div><strong>Genre:</strong> Punk Rock | Music</div>
+        <div><strong>First seen:</strong> Jan 2006</div>
+        <div><strong>Last seen:</strong> Aug 2018</div>
+        <div><strong>Lifespan:</strong> 12.7 years</div>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="script.js"></script>
+  </body>
+
 </html>
