@@ -27,13 +27,13 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   const S = height / 2000;     // = 1.08
 
   // Your constants (scaled where needed)
-  const radius       = 310 * S;
+  const radius       = 380 * S;
   const groupCenterY = Math.round(395 * S);
   const groundY      = Math.round(1500 * S);
 
-  const pileDotRadius = 3.5;
-  const pileSpacingX  = 7;
-  const pileSpacingY  = 7 * S;
+  const pileDotRadius = 4;
+  const pileSpacingX  = 9;
+  const pileSpacingY  = 9 * S;
 
   const startYear = 1996;
   const endYear   = 2024;
@@ -126,7 +126,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   const points = filtered.map((d, i) => {
     const phi = Math.acos(1 - 2 * Math.random());
     const theta = 2 * Math.PI * Math.random();
-    const r = radius * (0.6 + Math.random() * 0.4);
+    const r = radius * (0.7 + Math.random() * 0.4);
     const x = r * Math.sin(phi) * Math.cos(theta);
     const y = r * Math.sin(phi) * Math.sin(theta);
     const z = r * Math.cos(phi);
@@ -191,6 +191,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     .style("background", "#0a0a0a")
     .style("display", "block");
 
+  
   // Append to the clipped viewport (IMPORTANT)
   document.getElementById("viewport").appendChild(svg.node());
 
@@ -233,6 +234,25 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Gradients/filters
   const defs = svg.append("defs");
+
+    const flickerGlow = defs.append("filter")
+  .attr("id", "flicker-glow")
+  .attr("x", "-50%").attr("y", "-50%")
+  .attr("width", "200%").attr("height", "200%");
+
+flickerGlow.append("feGaussianBlur")
+  .attr("in", "SourceGraphic")
+  .attr("stdDeviation", 4)
+  .attr("result", "blur");
+
+flickerGlow.append("feMerge")
+  .selectAll("feMergeNode")
+  .data(["blur", "SourceGraphic"])
+  .enter()
+  .append("feMergeNode")
+  .attr("in", d => d);
+
+
   const grad = defs.append("linearGradient")
     .attr("id", "capsule-gradient")
     .attr("x1","0%").attr("x2","100%")
@@ -254,6 +274,31 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     f.append("feMergeNode").attr("in","SourceGraphic");
   });
 
+  // Extra glow just for selected capsules
+const capsuleGlow = defs.append("filter")
+  .attr("id", "capsule-glow")
+  .attr("x", "-100%").attr("y", "-100%")
+  .attr("width", "300%").attr("height", "300%");
+
+// soft neon-ish outer glow
+capsuleGlow.append("feGaussianBlur")
+  .attr("in", "SourceGraphic")
+  .attr("stdDeviation", 6)
+  .attr("result", "blurA");
+
+// faint cyan drop shadow to lift off background
+capsuleGlow.append("feDropShadow")
+  .attr("dx", 0).attr("dy", 5)
+  .attr("stdDeviation", 3.5)
+  .attr("flood-color", "#16e6ff")
+  .attr("flood-opacity", 0.8);
+
+// merge the glow+source
+const cm = capsuleGlow.append("feMerge");
+cm.append("feMergeNode").attr("in", "blurA");
+cm.append("feMergeNode").attr("in", "SourceGraphic");
+
+
   // Capsules UI
   const capsuleGroup = svg.append("g").attr("transform","translate(20, 32)");
   const capsuleHeight = 36, capsuleSpacing = 20, capsulePaddingX = 28;
@@ -261,6 +306,56 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   let selectedCategory = null;
   let selectedType2 = null;
+
+  // --- minimal sync for bottom: re-apply selection regularly ---
+const isBottom = (new URLSearchParams(window.location.search).get("view") === "bottom");
+
+let lastCatSeen = null;
+let lastT2Seen  = null;
+
+function readSelectionFromStorage() {
+  // read current values (top writes these)
+  const cat = localStorage.getItem("vizCategory") || "";
+  const t2  = localStorage.getItem("vizType2") || "";
+  return {
+    cat: cat ? cat : null,
+    t2:  t2  ? t2  : null
+  };
+}
+
+function maybeApplySelection() {
+  const { cat, t2 } = readSelectionFromStorage();
+
+  // Only change if different from what we’re showing
+  if (cat !== lastCatSeen || t2 !== lastT2Seen) {
+    lastCatSeen = cat;
+    lastT2Seen  = t2;
+
+    selectedCategory = cat;
+    selectedType2    = t2;
+
+    // redraw highlights immediately
+    if (typeof updateCategoryHighlight === "function") {
+      if (dots) updateCategoryHighlight();
+    }
+  }
+}
+
+// Bottom: refresh selection on a timer + on focus (covers missed events)
+if (isBottom) {
+  // 1) Poll every 1000 ms (cheap & robust)
+  setInterval(maybeApplySelection, 1000);
+
+  // 2) Also when the window/tab gains focus
+  window.addEventListener("focus", maybeApplySelection);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") maybeApplySelection();
+  });
+}
+
+// Also adopt any existing selection at startup (both top & bottom)
+
+
 
   function drawCapsules() {
     capsuleGroup.selectAll("*").remove();
@@ -317,9 +412,11 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           .attr("width", fullWidth)
           .attr("fill", "#151D21")
           .attr("stroke", category === selectedCategory ? "#00ffe7" : "#7fe6f6")
-          .attr("stroke-width", category === selectedCategory ? 3 : 2)
-          .style("filter", "drop-shadow(0 2px 8px rgba(22,230,255,0.09))")
+          .attr("stroke-width", category === selectedCategory ? 5 : 2)
+          // use SVG filter for consistency and stronger visual
+          .attr("filter", category === selectedCategory ? "url(#capsule-glow)" : null)
           .attr("pointer-events", "all");
+
 
         capsule.on("mouseover", function () {
           if (selectedCategory !== category) {
@@ -339,6 +436,9 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
         .on("click", () => {
           selectedCategory = null;
           selectedType2   = null;
+            // NEW: broadcast clears so the other window resets too
+          localStorage.setItem("vizCategory", "");
+          localStorage.setItem("vizType2", "");
           drawCapsules();
           d3.select("#sliding-ambiguity-text").style("display","none");
           d3.select("#sliding-inner").style("left","-370px");
@@ -394,9 +494,11 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           .attr("width", fullWidth)
           .attr("fill", "#151D21")
           .attr("stroke", type2 === selectedType2 ? "#00ffe7" : "#7fe6f6")
-          .attr("stroke-width", type2 === selectedType2 ? 3 : 2)
-          .style("filter","drop-shadow(0 2px 8px rgba(22,230,255,0.09))")
+          .attr("stroke-width", type2 === selectedType2 ? 5 : 2)
+          .attr("filter", type2 === selectedType2 ? "url(#capsule-glow)" : null)
           .attr("pointer-events","all");
+          
+
 
         capsule.on("mouseover", function(){
           if (selectedType2 !== type2) {
@@ -421,7 +523,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     .attr("stroke-width",0.4)
     .attr("opacity",0.05);
 
-  const dots = g.selectAll("circle")
+  let dots = g.selectAll("circle")
     .data(points)
     .join("circle");
 
@@ -448,9 +550,9 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       .style("opacity", 1)
       .html(`
         <div class="tooltip-header">
-          <img src="assets/icons/icons8-close-window-50-2.png" />
-          <img src="assets/icons/icons8-maximize-window-50-2.png" />
-          <img src="assets/icons/icons8-minimize-window-50-2.png" />
+          <img src="icons8-close-window-50-2.png" />
+          <img src="icons8-maximize-window-50-2.png" />
+          <img src="icons8-minimize-window-50-2.png" />
           <span class="tooltip-title">${d.title}</span>
         </div>
         <div class="tooltip-content">
@@ -530,7 +632,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
 window.addEventListener("storage", (e) => {
   // For debugging
-  console.log("Storage event:", e.key, "->", e.newValue);
+  //console.log("Storage event:", e.key, "->", e.newValue);
 
   // Time sync
   if (e.key === "vizTime") {
@@ -544,14 +646,14 @@ window.addEventListener("storage", (e) => {
   if (e.key === "vizCategory") {
     selectedCategory = e.newValue || null;
     console.log("Received category:", selectedCategory);
-    updateCategoryHighlight(); // Force redraw instantly
+    if (dots) updateCategoryHighlight();  // Force redraw instantly
   }
 
   // Type2 sync
   if (e.key === "vizType2") {
     selectedType2 = e.newValue || null;
     console.log("Received type2:", selectedType2);
-    updateCategoryHighlight(); // Force redraw instantly
+    if (dots) updateCategoryHighlight();// Force redraw instantly
   }
 });
 
@@ -562,13 +664,13 @@ window.addEventListener("storage", (e) => {
   });
   d3.select(window).on("mousemove", (event) => { if (dragging) setScrub(d3.pointer(event, scrubberGroup.node())[0]); });
   d3.select(window).on("mouseup", () => {
-    if (dragging) {
-      dragging = false; isScrubbingManually = false;
-      const now = performance.now();
-      const elapsedSeconds = (now - lastResetTime) / 1000;
-      offsetMonths = scrubMonth - elapsedSeconds * speed;
-    }
-  });
+  if (isScrubbingManually) {
+    isScrubbingManually = false;
+    lastResetTime = performance.now();
+    offsetMonths = scrubMonth;
+  }
+});
+
 
     function setScrub(x) {
     x = Math.max(0, Math.min(x, scrubberWidth));
@@ -598,6 +700,16 @@ window.addEventListener("storage", (e) => {
     if (!isNaN(m)) applySyncedTime(m);
   }
 
+  updateScrubberUI();
+
+
+  // NEW: also adopt any existing selection on boot
+  const bootCategory = localStorage.getItem("vizCategory") || "";
+  const bootType2    = localStorage.getItem("vizType2")    || "";
+  selectedCategory   = bootCategory ? bootCategory : null;
+  selectedType2      = bootType2    ? bootType2    : null;
+  updateCategoryHighlight();
+
 
   function getMonthYear(monthIdx) {
     const year = startYear + Math.floor(monthIdx / 12);
@@ -613,32 +725,60 @@ window.addEventListener("storage", (e) => {
   // Animation
   let maxMonthSeen = 0;
 
-function updateCategoryHighlightSingle(d) {
-  const flicker = d.flicker && !d.hasFallen
-    ? 0.4 + 0.4 * Math.abs(Math.sin(performance.now() / d.flickerSpeed + d.phase))
-    : 1;
+/*function updateCategoryHighlightSingle(d) {
+  // Is this dot within 3 months of disappearing?
+  let inWindow = false;
+  if (!d.hasFallen && d.lastMonthIndex != null) {
+    const monthsLeft = d.lastMonthIndex - scrubMonth;
+    inWindow = (monthsLeft <= 3 && monthsLeft >= 0);
+  }
+
+  // Category/type match
   let match = true;
   if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
   if (selectedType2) match = d.type2 === selectedType2;
-  let opacity = flicker * d.baseOpacity * (match ? 1 : 0.1);
+
+  // Base opacity from depth + category filter
+  const base = d.baseOpacity * (match ? 1 : 0.1);
+
+  // Strong blink (square wave) during the 3 months before fall
+  // ~7 Hz: on for 140ms, off for 140ms
+  let opacity = base;
+  if (inWindow) {
+    const on = (Math.floor(performance.now() / 140) % 2) === 0;
+    opacity = on ? 1.0 : base * 0.2;  // bright ON, very dim OFF
+  }
+
+  // Fade if fallen
   if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
-  if (selectedPoint === d) opacity = 3;
-  return opacity;
-}
+
+  // Selected point is always fully visible
+  if (selectedPoint === d) opacity = 1.0;
+
+  return Math.max(0, Math.min(1, opacity));
+}*/
+
+
+
+
 
 function updateCategoryHighlight() {
+  if (!dots) return; 
   dots
-    .attr("fill-opacity", d => updateCategoryHighlightSingle(d))
-    .attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+    //.attr("fill-opacity", d => updateCategoryHighlightSingle(d))
+    //.attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+    .attr("fill", "#aaffff");
+
 }
 
-
+maybeApplySelection();
 
   function animate(now) {
     const t = now - lastResetTime;
     const rawMonth = ((t / 1000) * speed + offsetMonths);
     const realMonthsElapsed = Math.floor(rawMonth);
     let displayedMonthsElapsed;
+    const currentMonth = realMonthsElapsed;
 
     if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
       if (!pauseStarted) { pauseStarted = true; }
@@ -657,16 +797,16 @@ function updateCategoryHighlight() {
       displayedMonthsElapsed = realMonthsElapsed;
     }
 
-        if (!isScrubbingManually) {
-      scrubMonth = displayedMonthsElapsed;
-      updateScrubberUI();
+        // Always use this frame’s value of realMonthsElapsed for everything
+scrubMonth = displayedMonthsElapsed;
+updateScrubberUI();
 
-      // Broadcast only when the integer month actually changes
-      if (scrubMonth !== lastBroadcastedMonth) {
-        localStorage.setItem("vizTime", String(scrubMonth));
-        lastBroadcastedMonth = scrubMonth;
-      }
-    }
+// Sync across windows (but only if animation is running, not during manual scrub)
+if (!isScrubbingManually && scrubMonth !== lastBroadcastedMonth) {
+  localStorage.setItem("vizTime", String(scrubMonth));
+  lastBroadcastedMonth = scrubMonth;
+}
+
 
     if (displayedMonthsElapsed > maxMonthSeen) maxMonthSeen = displayedMonthsElapsed;
 
@@ -701,8 +841,8 @@ function updateCategoryHighlight() {
         p._drawY = p.y + (pileY - p.y) * ease;
         p._drawZ = p.z;
       } else {
-        const rotY = Math.sin(t / 4000) * 0.5;
-        const rotX = Math.cos(t / 3000) * 0.5;
+        const rotY = Math.sin(t / 7000) * 0.5;
+        const rotX = Math.cos(t / 5000) * 0.5;
         const rx = p.x * Math.cos(rotY) - p.z * Math.sin(rotY);
         const rz = p.x * Math.sin(rotY) + p.z * Math.cos(rotY);
         const ry = p.y * Math.cos(rotX) - rz * Math.sin(rotX);
@@ -712,26 +852,73 @@ function updateCategoryHighlight() {
     });
 
     dots
-      .attr("cx", d => d._drawX)
-      .attr("cy", d => d._drawY)
-      .attr("r", d => {
-        const baseR = d.hasFallen ? pileDotRadius : (d.debugFirstFaller ? 7 : 3.5);
-        return (selectedPoint === d) ? baseR + 1 : baseR;
-      })
-      .attr("stroke", d => (selectedPoint === d) ? "#fff" : "none")
-      .attr("stroke-width", d => (selectedPoint === d) ? 1.5 : 0)
-      .attr("fill-opacity", d => {
-        const flicker = d.flicker && !d.hasFallen ? 0.4 + 0.4 * Math.abs(Math.sin(now / d.flickerSpeed + d.phase)) : 1;
-        let match = true;
-        if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
-        if (selectedType2) match = d.type2 === selectedType2;
-        let opacity = flicker * d.baseOpacity * (match ? 1 : 0.1);
-        if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
-        if (selectedPoint === d) opacity = 3;
-        return opacity;
-      })
-      .attr("fill-opacity", d => updateCategoryHighlightSingle(d))
-      .attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+  .attr("cx", d => d._drawX)
+  .attr("cy", d => d._drawY)
+  .attr("r", d => {
+  //const baseR = d.debugFirstFaller ? 7 : 4.5;
+  const baseR = 4.5;
+  const monthsLeft = d.lastMonthIndex - scrubMonth;
+
+  if (
+    d.lastMonthIndex != null &&
+    d.lastMonthIndex < 348 &&
+    monthsLeft <= 3 &&
+    monthsLeft >= 0
+  ) {
+    // Slow inward pulse: 0.6x to 1x of base size, with easing
+    const t = performance.now() / 800; // Lower = slower pulse
+    const raw = Math.sin(t + d.phase); // base wave
+    const eased = raw < 0
+      ? 1 + 0.3 * raw // Shrink to 70% and pause slightly at low
+      : 1;            // Hold full size when above baseline
+
+    return baseR * eased;
+  }
+
+  return (selectedPoint === d) ? baseR + 1 : baseR;
+})
+
+
+
+
+  .attr("stroke", d => (selectedPoint === d) ? "#fff" : "none")
+  .attr("stroke-width", d => (selectedPoint === d) ? 1.5 : 0)
+  .attr("fill-opacity", d => {
+  let match = true;
+  if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
+  if (selectedType2) match = d.type2 === selectedType2;
+
+  let opacity = d.baseOpacity * (match ? 1 : 0.1);
+
+  if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
+  if (selectedPoint === d) opacity = 1;
+
+  return opacity;
+})
+
+
+
+/*.attr("filter", d => {
+  const monthsLeft = d.lastMonthIndex - scrubMonth;
+
+  if (
+    d.lastMonthIndex != null &&
+    d.lastMonthIndex < 348 &&
+    monthsLeft <= 3 &&
+    monthsLeft >= 0
+  ) {
+    return "url(#flicker-glow)";
+  }
+
+  return null;
+})*/
+
+
+
+
+
+  //.attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
+  .attr("fill", "#aaffff");
 
 
 
@@ -785,3 +972,5 @@ function updateCategoryHighlight() {
 
   requestAnimationFrame(animate);
 });
+
+
