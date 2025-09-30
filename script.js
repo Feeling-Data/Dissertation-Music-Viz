@@ -698,7 +698,16 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     event.preventDefault();
   });
   d3.select(window).on("mousemove", (event) => { if (dragging) { setScrub(d3.pointer(event, scrubberGroup.node())[0]); } });
-  d3.select(window).on("mouseup", () => { if (dragging) { dragging = false; isScrubbingManually = false; const now = performance.now(); const elapsedSeconds = (now - lastResetTime) / 1000; offsetMonths = scrubMonth - elapsedSeconds * speed; } });
+  d3.select(window).on("mouseup", () => {
+    if (dragging) {
+      dragging = false;
+      isScrubbingManually = false;
+      const now = performance.now();
+      // Set offset so that rawMonth = scrubMonth when t = 0 (immediately after reset)
+      offsetMonths = scrubMonth;
+      lastResetTime = now; // Reset the animation clock to current time
+    }
+  });
 
 
 
@@ -821,7 +830,12 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     const currentMonth = realMonthsElapsed;
 
     // Use continuous time for smooth falling animation
-    const continuousTime = rawMonth;
+    let continuousTime = rawMonth;
+
+    // When scrubbing manually, use the slider position for animation timing
+    if (isScrubbingManually) {
+      continuousTime = scrubMonth;
+    }
 
     if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
       if (!pauseStarted) { pauseStarted = true; }
