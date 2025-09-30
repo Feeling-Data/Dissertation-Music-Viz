@@ -28,11 +28,12 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Your constants (scaled where needed)
   const radius = 370 * S;
-  const groupCenterY = Math.round(395 * S);
+  const groupCenterY = Math.round(450 * S); // Added top margin
   const groundY = Math.round(1500 * S);
+  const groundLineY = groundY + 8; // Move ground line below the points (6px radius + 2px buffer)
 
   const pileDotRadius = 4;
-  const pileSpacingX = 9;
+  const pileSpacingX = 14; // Increased to prevent overlap (point diameter is 12px)
   const pileSpacingY = 9 * S;
 
   const startYear = 1996;
@@ -168,7 +169,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       phase: Math.random() * 100,
       flickerSpeed: 100 + Math.random() * 200,
       // Use consistent very slow fall duration for all points
-      fallDuration: 36.0, // 12 months (1 year) duration for all points
+      fallDuration: 24.0, // 12 months (1 year) duration for all points
       fallDelay: 0, // No artificial delay - use actual data timing
       lifespanMonths,
       baseOpacity: d3.scaleLinear().domain([-radius, radius]).range([0.15, 0.8])(z),
@@ -232,10 +233,10 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Ground line
   g.append("line")
-    .attr("x1", -radius * 1.2)
-    .attr("x2", radius * 1.2)
-    .attr("y1", groundY)
-    .attr("y2", groundY)
+    .attr("x1", -radius * 1.4)
+    .attr("x2", radius * 1.4)
+    .attr("y1", groundLineY)
+    .attr("y2", groundLineY)
     .attr("stroke", "#eee")
     .attr("stroke-width", 2)
     .attr("opacity", 0.2);
@@ -902,7 +903,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
         // Use continuous time for smooth interpolation
         const timeSinceFall = Math.max(0, continuousTime - p.fallStartTime);
         const tNorm = Math.min(timeSinceFall / p.fallDuration, 1);
-        const ease = fastEaseOutCubic(tNorm);
+        const ease = 1 - (1 - tNorm) * (1 - tNorm); // Gentle quadratic ease-out
 
         p.fallFade = 1 - 0.65 * tNorm;
         if (tNorm >= 1) p.fallFade = 0.35;
@@ -930,6 +931,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
         const monthsLeft = d.lastMonthIndex - scrubMonth;
 
         if (
+          !d.hasFallen && // Only pulse points that haven't fallen yet
           d.lastMonthIndex != null &&
           d.lastMonthIndex < 348 &&
           monthsLeft <= 3 &&
