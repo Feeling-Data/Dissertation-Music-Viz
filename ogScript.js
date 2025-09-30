@@ -1,3 +1,4 @@
+
 // -------- 0) Detect bottom view & prep scaling --------
 const params = new URLSearchParams(window.location.search);
 if (params.get("view") === "bottom") {
@@ -132,25 +133,11 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     const z = r * Math.cos(phi);
 
     const lastMonthIndex = getMonthIndex(d.Last_Live_Capture);
-    const firstMonthIndex = getMonthIndex(d.First_Live_Capture);
 
     let debugFirstFaller = false;
     if (d.Last_Live_Capture) {
       const year = +d.Last_Live_Capture.slice(0, 4);
       if (year <= 2000) debugFirstFaller = true;
-    }
-
-    // Calculate actual lifespan from data
-    const lifespanMonths = lastMonthIndex !== null && firstMonthIndex !== null
-      ? Math.max(1, lastMonthIndex - firstMonthIndex)
-      : 12; // Default to 1 year if data is missing
-
-    // Pre-calculate pile positions for performance
-    let pileX = 0, pileY = 0;
-    if (d.pileRow !== null && d.pileCol !== null) {
-      const rowDots = d.pileRowDots;
-      pileX = (d.pileCol - (rowDots - 1) / 2) * pileSpacingX;
-      pileY = groundY - (d.numRows - 1 - d.pileRow) * pileSpacingY;
     }
 
     return {
@@ -167,10 +154,6 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       flicker: Math.random() < 0.1,
       phase: Math.random() * 100,
       flickerSpeed: 100 + Math.random() * 200,
-      // Use consistent very slow fall duration for all points
-      fallDuration: 36.0, // 12 months (1 year) duration for all points
-      fallDelay: 0, // No artificial delay - use actual data timing
-      lifespanMonths,
       baseOpacity: d3.scaleLinear().domain([-radius, radius]).range([0.15, 0.8])(z),
       baseSize: d3.scaleLinear().domain([-radius, radius]).range([1.5, 5])(z),
       hasFallen: false,
@@ -180,10 +163,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       pileCol: d.pileCol,
       pileRowDots: d.pileRowDots,
       numRows: d.numRows,
-      fallFade: 1,
-      // Pre-calculated pile positions
-      pileX,
-      pileY
+      fallFade: 1
     };
   });
 
@@ -545,22 +525,10 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   let dots = g.selectAll("circle")
     .data(points)
-    .join("circle")
-    .style("cursor", "pointer");
+    .join("circle");
 
   let selectedPoint = null;
   let selectedFrozen = null;
-
-  // Add hover effects for better clickability
-  dots.on("mouseover", function (event, d) {
-    d3.select(this).attr("r", 8); // Slightly larger on hover
-  });
-
-  dots.on("mouseout", function (event, d) {
-    if (selectedPoint !== d) {
-      d3.select(this).attr("r", 6); // Return to normal size
-    }
-  });
 
   dots.on("click", function (event, d) {
     event.stopPropagation();
@@ -691,11 +659,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
 
   scrubberGroup.on("mousedown", function (event) {
-    dragging = true;
-    isScrubbingManually = true;
-    lastResetTime = performance.now();
-    setScrub(d3.pointer(event, this)[0]);
-    event.preventDefault();
+    dragging = true; isScrubbingManually = true; lastResetTime = performance.now();
   });
   d3.select(window).on("mousemove", (event) => { if (dragging) { setScrub(d3.pointer(event, scrubberGroup.node())[0]); } });
   d3.select(window).on("mouseup", () => { if (dragging) { dragging = false; isScrubbingManually = false; const now = performance.now(); const elapsedSeconds = (now - lastResetTime) / 1000; offsetMonths = scrubMonth - elapsedSeconds * speed; } });
@@ -723,11 +687,12 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     scrubberTimeLabel.text(getTimeLabel(scrubMonth));
   }
 
-  // Clear any stored time to ensure fresh start
-  localStorage.removeItem("vizTime");
-
-  // Ensure slider starts at the beginning
-  scrubMonth = 0;
+  // On load, if another window already set a time, adopt it
+  const bootSync = localStorage.getItem("vizTime");
+  if (bootSync !== null) {
+    const m = parseFloat(bootSync);
+    if (!isNaN(m)) applySyncedTime(m);
+  }
 
   updateScrubberUI();
 
@@ -753,17 +718,6 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Animation
   let maxMonthSeen = 0;
-
-  // Fast easing function (replaces Math.pow for better performance)
-  function fastEaseOutCubic(t) {
-    const t1 = 1 - t;
-    return 1 - t1 * t1 * t1;
-  }
-
-  // Cache rotation calculations
-  let lastRotationTime = 0;
-  let cachedRotY = 0, cachedRotX = 0;
-  let cachedCosY = 1, cachedSinY = 0, cachedCosX = 1, cachedSinX = 0;
 
   /*function updateCategoryHighlightSingle(d) {
     // Is this dot within 3 months of disappearing?
@@ -820,9 +774,6 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     let displayedMonthsElapsed;
     const currentMonth = realMonthsElapsed;
 
-    // Use continuous time for smooth falling animation
-    const continuousTime = rawMonth;
-
     if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
       if (!pauseStarted) { pauseStarted = true; }
       if (!pauseStartTime) pauseStartTime = performance.now();
@@ -833,18 +784,16 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       } else {
         // reset
         pauseStarted = false; pauseStartTime = null; offsetMonths = 0; lastResetTime = performance.now();
-        points.forEach(p => { p.hasFallen = false; p.fallStartTime = null; p.fallFade = 1; });
+        points.forEach(p => { p.hasFallen = false; p.fallStartMonth = null; p.fallFade = 1; });
       }
     } else {
       pauseStarted = false;
       displayedMonthsElapsed = realMonthsElapsed;
     }
 
-    // Only update scrubMonth if not manually scrubbing
-    if (!isScrubbingManually) {
-      scrubMonth = displayedMonthsElapsed;
-      updateScrubberUI();
-    }
+    // Always use this frame’s value of realMonthsElapsed for everything
+    scrubMonth = displayedMonthsElapsed;
+    updateScrubberUI();
 
     // Sync across windows (but only if animation is running, not during manual scrub)
     if (!isScrubbingManually && scrubMonth !== lastBroadcastedMonth) {
@@ -855,54 +804,43 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
     if (displayedMonthsElapsed > maxMonthSeen) maxMonthSeen = displayedMonthsElapsed;
 
-    // Use scrubMonth for time display to show current position
-    timeLabel.text(getTimeLabel(scrubMonth));
-    scrubberTimeLabel.text(getTimeLabel(scrubMonth));
+    timeLabel.text(getTimeLabel(displayedMonthsElapsed));
+    scrubberTimeLabel.text(getTimeLabel(displayedMonthsElapsed));
 
-    // Smooth falling animation parameters (now using per-point variation)
-
-    // Cache rotation calculations (only recalculate if time changed significantly)
-    if (Math.abs(t - lastRotationTime) > 16) { // ~60fps threshold
-      lastRotationTime = t;
-      cachedRotY = Math.sin(t / 27000) * 0.5;
-      cachedRotX = Math.cos(t / 20000) * 0.5;
-      cachedCosY = Math.cos(cachedRotY);
-      cachedSinY = Math.sin(cachedRotY);
-      cachedCosX = Math.cos(cachedRotX);
-      cachedSinX = Math.sin(cachedRotX);
-    }
+    const fallDuration = 1.2;
+    const fps = 60;
+    const fallFrames = Math.round(fallDuration * fps);
 
     points.forEach(p => {
       if (selectedPoint === p && selectedFrozen) {
         p._drawX = selectedFrozen.x; p._drawY = selectedFrozen.y; p._drawZ = selectedFrozen.z; p.fallFade = 1;
         return;
       }
-
-      // Check if point should start falling using actual data timing
-      if (!p.hasFallen && p.lastMonthIndex != null && continuousTime >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
-        p.hasFallen = true;
-        p.fallStartTime = continuousTime; // Store continuous time for smooth animation
+      if (!p.hasFallen && p.lastMonthIndex != null && realMonthsElapsed >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
+        p.hasFallen = true; p.fallY = 0; p.fallStartMonth = Math.max(p.lastMonthIndex, 0);
       }
-
       if (p.hasFallen) {
-        // Use continuous time for smooth interpolation
-        const timeSinceFall = Math.max(0, continuousTime - p.fallStartTime);
-        const tNorm = Math.min(timeSinceFall / p.fallDuration, 1);
-        const ease = fastEaseOutCubic(tNorm);
+        let sinceFall = Math.max(0, Math.min(realMonthsElapsed - p.fallStartMonth, fallFrames));
+        let tNorm = sinceFall / fallFrames;
+        const ease = 1 - Math.pow(1 - tNorm, 3);
 
         p.fallFade = 1 - 0.65 * tNorm;
         if (tNorm >= 1) p.fallFade = 0.35;
 
-        // Use pre-calculated pile positions with smooth interpolation
-        p._drawX = p.x + (p.pileX - p.x) * ease;
-        p._drawY = p.y + (p.pileY - p.y) * ease;
+        const rowDots = p.pileRowDots;
+        const pileX = (p.pileCol - (rowDots - 1) / 2) * pileSpacingX;
+        const pileY = groundY - (p.numRows - 1 - p.pileRow) * pileSpacingY;
+
+        p._drawX = p.x + (pileX - p.x) * ease;
+        p._drawY = p.y + (pileY - p.y) * ease;
         p._drawZ = p.z;
       } else {
-        // Use cached rotation values for non-falling points
-        const rx = p.x * cachedCosY - p.z * cachedSinY;
-        const rz = p.x * cachedSinY + p.z * cachedCosY;
-        const ry = p.y * cachedCosX - rz * cachedSinX;
-        const finalZ = p.y * cachedSinX + rz * cachedCosX;
+        const rotY = Math.sin(t / 7000) * 0.5;
+        const rotX = Math.cos(t / 5000) * 0.5;
+        const rx = p.x * Math.cos(rotY) - p.z * Math.sin(rotY);
+        const rz = p.x * Math.sin(rotY) + p.z * Math.cos(rotY);
+        const ry = p.y * Math.cos(rotX) - rz * Math.sin(rotX);
+        const finalZ = p.y * Math.sin(rotX) + rz * Math.cos(rotX);
         p._drawX = rx; p._drawY = ry; p._drawZ = finalZ; p.fallFade = 1;
       }
     });
@@ -912,7 +850,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       .attr("cy", d => d._drawY)
       .attr("r", d => {
         //const baseR = d.debugFirstFaller ? 7 : 4.5;
-        const baseR = 6.0; // Increased from 4.5 to 6.0 for easier clicking
+        const baseR = 4.5;
         const monthsLeft = d.lastMonthIndex - scrubMonth;
 
         if (
@@ -922,7 +860,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           monthsLeft >= 0
         ) {
           // Slow inward pulse: 0.6x to 1x of base size, with easing
-          const t = now / 800; // Use cached 'now' for better performance
+          const t = performance.now() / 800; // Lower = slower pulse
           const raw = Math.sin(t + d.phase); // base wave
           const eased = raw < 0
             ? 1 + 0.3 * raw // Shrink to 70% and pause slightly at low
@@ -931,7 +869,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
           return baseR * eased;
         }
 
-        return (selectedPoint === d) ? baseR + 2 : baseR;
+        return (selectedPoint === d) ? baseR + 1 : baseR;
       })
 
 
@@ -1028,5 +966,3 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   requestAnimationFrame(animate);
 });
-
-
