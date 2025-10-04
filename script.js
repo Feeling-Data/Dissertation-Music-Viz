@@ -28,7 +28,9 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Your constants (scaled where needed)
   const radius = 370 * S;
-  const groupCenterY = Math.round(450 * S); // Added top margin
+  // Adjust positioning for bottom view - move visualization up
+  const isBottomView = (new URLSearchParams(window.location.search).get("view") === "bottom");
+  const groupCenterY = isBottomView ? Math.round(100 + radius) : Math.round(150 + radius); // Move up more for bottom view
   const groundY = Math.round(1500 * S);
   const groundLineY = groundY + 8; // Move ground line below the points (6px radius + 2px buffer)
 
@@ -45,10 +47,26 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   const pauseDurationMs = 70000;
   let lastResetTime = performance.now();
   let isScrubbingManually = false;
+  let lastPauseTime = null;
+  const autoResumeDelay = 60000; // 1 minute in milliseconds
 
   // Prepare categories and type2
   const filtered = data.filter(d => d.Last_Live_Capture && d.Grouped_Category && d.Grouped_Category.trim());
-  const categories = Array.from(new Set(filtered.map(d => d.Grouped_Category.trim()))).sort();
+
+  // Filter out date entries and invalid categories, keep only valid category names
+  const validCategories = filtered
+    .map(d => d.Grouped_Category.trim())
+    .filter(cat => {
+      // Filter out date patterns (YYYY-MM-DD format)
+      if (/^\d{4}-\d{2}-\d{2}$/.test(cat)) return false;
+      // Filter out other invalid entries
+      if (cat === "No archived live version" || cat === "Error after 5 retries") return false;
+      // Filter out location names and other non-category entries
+      if (cat.includes('"') || cat.includes(".") || cat.length < 3) return false;
+      return true;
+    });
+
+  const categories = Array.from(new Set(validCategories)).sort();
 
   const categoryToType2 = {};
   filtered.forEach(d => {
@@ -241,18 +259,20 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     .attr("stroke-width", 2)
     .attr("opacity", 0.2);
 
-  // Bottom-left time label
-  const timeLabel = svg.append("text")
-    .attr("x", 20)
-    .attr("y", height - 20)
-    .attr("fill", "#cccccc")
-    .attr("font-size", "14px")
-    .attr("font-family", "monospace")
-    .attr("opacity", 0.8)
-    .text("January 1996");
-
   // Tooltip div
   const tooltip = d3.select("#tooltip");
+
+  // Event delegation for tooltip close button
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "tooltip-close-btn") {
+      e.stopPropagation();
+      e.preventDefault();
+      console.log("Tooltip close button clicked"); // Debug log
+      tooltip.style("opacity", 0);
+      selectedPoint = null;
+      selectedFrozen = null;
+    }
+  });
 
   // Gradients/filters
   const defs = svg.append("defs");
@@ -321,10 +341,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   cm.append("feMergeNode").attr("in", "SourceGraphic");
 
 
-  // Capsules UI
-  const capsuleGroup = svg.append("g").attr("transform", "translate(20, 32)");
-  const capsuleHeight = 36, capsuleSpacing = 20, capsulePaddingX = 28;
-  const type2CapsuleHeight = 28, type2CapsuleSpacing = 28, type2CapsulePaddingX = 18;
+  // Button container is now handled in HTML/CSS
 
   let selectedCategory = null;
   let selectedType2 = null;
@@ -380,157 +397,138 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
 
   function drawCapsules() {
-    capsuleGroup.selectAll("*").remove();
+    const buttonContainer = document.getElementById("button-container");
+    buttonContainer.innerHTML = "";
 
     if (!selectedCategory) {
       categories.forEach((category, i) => {
-        const capsule = capsuleGroup.append("g")
-          .style("cursor", "pointer")
-          .attr("transform", `translate(0, ${i * (capsuleHeight + capsuleSpacing)})`)
-          .on("click", () => {
-            selectedCategory = category;
-            // broadcast selection to the other window
-            console.log("Broadcasting category:", selectedCategory); // debug
-            localStorage.setItem("vizCategory", selectedCategory || "");
-            localStorage.setItem("vizType2", ""); // clear type2 when picking a new category
+        const button = document.createElement("button");
+        button.className = "category-button";
+        button.textContent = category;
+        button.style.marginTop = i === 0 ? "0" : "20px";
 
-            const stats = getCategoryStats(category, filtered);
-            if (stats) {
-              d3.select("#category-stats").html(`
-                <div style="font-weight:bold;font-size:25px;letter-spacing:0.3px;color:#fff;">${category}</div>
-                <div style="margin:7px 0 2px 0;opacity:0.88;">Websites: <b>${stats.num}</b></div>
-                <div style="margin-bottom:2px;opacity:0.88;">Most common type: <b>${stats.modeType2}</b></div>
-                <div style="margin-bottom:2px;opacity:0.88;">Average lifespan: <b>${stats.avgLifespan} yrs</b></div>
-                <div style="margin-bottom:2px;opacity:0.88;">Earliest disappeared: <b>${stats.earliest}</b></div>
-                <div style="margin-bottom:2px;opacity:0.88;">Latest disappeared: <b>${stats.latest}</b></div>
-              `).style("display", "block");
-            } else {
-              d3.select("#category-stats").style("display", "none");
-            }
+        button.addEventListener("click", () => {
+          selectedCategory = category;
+          // broadcast selection to the other window
+          console.log("Broadcasting category:", selectedCategory);
+          localStorage.setItem("vizCategory", selectedCategory || "");
+          localStorage.setItem("vizType2", ""); // clear type2 when picking a new category
 
-            selectedType2 = null;
-            drawCapsules();
-          });
+          // Hide tooltip and clear selected point when category is selected
+          tooltip.style("opacity", 0);
+          selectedPoint = null;
+          selectedFrozen = null;
 
-        const text = capsule.append("text")
-          .text(category)
-          .attr("dy", "0.35em")
-          .attr("x", capsulePaddingX)
-          .attr("y", capsuleHeight / 2)
-          .attr("text-anchor", "start")
-          .attr("font-family", "Inter, sans-serif")
-          .attr("font-size", "16px")
-          .attr("font-weight", 700)
-          .attr("fill", "#b6e3ef")
-          .attr("pointer-events", "none");
+          const stats = getCategoryStats(category, filtered);
+          if (stats) {
+            d3.select("#category-stats").html(`
+              <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between;">
+                <div style="text-align: left; position: relative;">
+                  <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${category}</div>
+                  <button id="stats-close-btn" style="position: absolute; top: 5px; right: 5px; background: #000000; border: 1px solid #FFF; color: #FFF; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 8px;">×</button>
+                </div>
+                <div>
+                  <span style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${stats.num}</span>
+                  <span style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-left: 8px;">WEBSITES</span>
+                </div>
+                <div>
+                  <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">Most common type:</div>
+                  <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${stats.modeType2.replace(/^MUSIC\s*:\s*/i, '') || 'MUSIC'}</div>
+                </div>
+                <div>
+                  <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">Average lifespan:</div>
+                  <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${stats.avgLifespan} yrs</div>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <div style="flex: 1;">
+                    <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">First disappeared:</div>
+                    <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${stats.earliest}</div>
+                  </div>
+                  <div style="width: 1px; background: #FFF; margin: 0 16px;"></div>
+                  <div style="flex: 1;">
+                    <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">Latest disappeared:</div>
+                    <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${stats.latest}</div>
+                  </div>
+                </div>
+              </div>
+            `).style("display", "block");
 
-        const textWidth = text.node().getBBox().width;
-        const fullWidth = textWidth + capsulePaddingX * 2;
-
-        const rect = capsule.insert("rect", "text")
-          .attr("rx", capsuleHeight / 2)
-          .attr("height", capsuleHeight)
-          .attr("width", fullWidth)
-          .attr("fill", "#151D21")
-          .attr("stroke", category === selectedCategory ? "#00ffe7" : "#7fe6f6")
-          .attr("stroke-width", category === selectedCategory ? 5 : 2)
-          // use SVG filter for consistency and stronger visual
-          .attr("filter", category === selectedCategory ? "url(#capsule-glow)" : null)
-          .attr("pointer-events", "all");
-
-
-        capsule.on("mouseover", function () {
-          if (selectedCategory !== category) {
-            rect.attr("fill", "url(#capsule-gradient)");
-            text.attr("fill", "#fff");
+            // Add close button event listener for stats panel (with a small delay to ensure DOM is ready)
+            setTimeout(() => {
+              const closeBtn = document.getElementById("stats-close-btn");
+              if (closeBtn) {
+                closeBtn.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  selectedCategory = null;
+                  selectedType2 = null;
+                  localStorage.setItem("vizCategory", "");
+                  localStorage.setItem("vizType2", "");
+                  d3.select("#category-stats").style("display", "none");
+                  drawCapsules();
+                });
+              }
+            }, 10);
+          } else {
+            d3.select("#category-stats").style("display", "none");
           }
+
+          selectedType2 = null;
+          drawCapsules();
         });
-        capsule.on("mouseout", function () {
-          rect.attr("fill", "#151D21");
-          text.attr("fill", "#b6e3ef");
-        });
+
+        buttonContainer.appendChild(button);
       });
     } else {
-      const backBtn = capsuleGroup.append("g")
-        .style("cursor", "pointer")
-        .attr("transform", "translate(0,0)")
-        .on("click", () => {
-          selectedCategory = null;
-          selectedType2 = null;
-          // NEW: broadcast clears so the other window resets too
-          localStorage.setItem("vizCategory", "");
-          localStorage.setItem("vizType2", "");
-          drawCapsules();
-          d3.select("#sliding-ambiguity-text").style("display", "none");
-          d3.select("#sliding-inner").style("left", "-370px");
-          d3.select("#category-stats").style("display", "none");
-        });
-      backBtn.append("rect").attr("width", 60).attr("height", 26).attr("rx", 13)
-        .attr("fill", "#191d24").attr("stroke", "#00ffe7").attr("stroke-width", 2);
-      backBtn.append("text").text("← Back").attr("x", 30).attr("y", 15)
-        .attr("text-anchor", "middle")
-        .attr("font-family", "Inter, sans-serif").attr("font-size", "13px")
-        .attr("fill", "#b6e3ef").attr("dominant-baseline", "middle");
+      // Back button
+      const backButton = document.createElement("button");
+      backButton.className = "back-button";
+      backButton.textContent = "← Back";
+      backButton.style.marginTop = "0";
 
+      backButton.addEventListener("click", () => {
+        selectedCategory = null;
+        selectedType2 = null;
+        localStorage.setItem("vizCategory", "");
+        localStorage.setItem("vizType2", "");
+        drawCapsules();
+        d3.select("#sliding-ambiguity-text").style("display", "none");
+        d3.select("#sliding-inner").style("left", "-370px");
+        d3.select("#category-stats").style("display", "none");
+      });
+
+      buttonContainer.appendChild(backButton);
+
+      // Type2 buttons
       const type2s = Array.from(categoryToType2[selectedCategory]).sort();
       type2s.forEach((type2, i) => {
-        const capsule = capsuleGroup.append("g")
-          .style("cursor", "pointer")
-          .attr("transform", `translate(0, ${(i + 1) * (type2CapsuleHeight + type2CapsuleSpacing)})`)
-          .on("click", () => {
-            selectedType2 = type2;
-            // broadcast selection to the other window
-            console.log("Broadcasting type2:", selectedType2); // debug
-            localStorage.setItem("vizType2", selectedType2 || "");
+        const button = document.createElement("button");
+        button.className = "type2-button";
+        // Remove "MUSIC : " prefix from type2 values (but keep "MUSIC" if it's standalone)
+        const displayText = type2.replace(/^MUSIC\s*:\s*/i, '') || 'MUSIC';
+        button.textContent = displayText;
+        button.style.marginTop = "20px";
 
+        button.addEventListener("click", () => {
+          selectedType2 = type2;
+          console.log("Broadcasting type2:", selectedType2);
+          localStorage.setItem("vizType2", selectedType2 || "");
 
-            if (selectedType2 && selectedType2.toLowerCase().trim() === "music") {
-              d3.select("#sliding-ambiguity-text").style("display", "block");
-              setTimeout(() => d3.select("#sliding-inner").style("left", "0px"), 10);
-            } else {
-              d3.select("#sliding-ambiguity-text").style("display", "none");
-              d3.select("#sliding-inner").style("left", "-370px");
-            }
-            drawCapsules();
-          });
+          // Hide tooltip and clear selected point when type2 is selected
+          tooltip.style("opacity", 0);
+          selectedPoint = null;
+          selectedFrozen = null;
 
-        const text = capsule.append("text")
-          .text(type2)
-          .attr("dy", "0.35em")
-          .attr("x", type2CapsulePaddingX)
-          .attr("y", type2CapsuleHeight / 2)
-          .attr("text-anchor", "start")
-          .attr("font-family", "Inter, sans-serif")
-          .attr("font-size", "14px")
-          .attr("font-weight", 700)
-          .attr("fill", "#b6e3ef")
-          .attr("pointer-events", "none");
-
-        const textWidth = text.node().getBBox().width;
-        const fullWidth = textWidth + type2CapsulePaddingX * 2;
-
-        const rect = capsule.insert("rect", "text")
-          .attr("rx", type2CapsuleHeight / 2)
-          .attr("height", type2CapsuleHeight)
-          .attr("width", fullWidth)
-          .attr("fill", "#151D21")
-          .attr("stroke", type2 === selectedType2 ? "#00ffe7" : "#7fe6f6")
-          .attr("stroke-width", type2 === selectedType2 ? 5 : 2)
-          .attr("filter", type2 === selectedType2 ? "url(#capsule-glow)" : null)
-          .attr("pointer-events", "all");
-
-
-
-        capsule.on("mouseover", function () {
-          if (selectedType2 !== type2) {
-            rect.attr("fill", "url(#capsule-gradient)");
-            text.attr("fill", "#fff");
+          if (selectedType2 && selectedType2.toLowerCase().trim() === "music") {
+            d3.select("#sliding-ambiguity-text").style("display", "block");
+            setTimeout(() => d3.select("#sliding-inner").style("left", "0px"), 10);
+          } else {
+            d3.select("#sliding-ambiguity-text").style("display", "none");
+            d3.select("#sliding-inner").style("left", "-370px");
           }
+          drawCapsules();
         });
-        capsule.on("mouseout", function () {
-          rect.attr("fill", "#151D21");
-          text.attr("fill", "#b6e3ef");
-        });
+
+        buttonContainer.appendChild(button);
       });
     }
   }
@@ -565,6 +563,21 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   dots.on("click", function (event, d) {
     event.stopPropagation();
+
+    // Check if this point is highlighted (not greyed out)
+    let match = true;
+    if (selectedCategory && !selectedType2) {
+      match = d.category === selectedCategory;
+    }
+    if (selectedType2) {
+      match = d.type2 === selectedType2;
+    }
+
+    // Only allow clicking on highlighted points when a category is selected
+    if (selectedCategory && !match) {
+      return; // Don't show tooltip for greyed-out points
+    }
+
     selectedPoint = d;
     selectedFrozen = { x: d._drawX, y: d._drawY, z: d._drawZ };
 
@@ -579,77 +592,92 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       : "–";
 
     const tooltip = d3.select("#tooltip");
+
+    // Position tooltip based on view and category selection
+    if (isBottomView) {
+      // Bottom view: center vertically on the right side
+      tooltip
+        .style("top", "50%")
+        .style("transform", "translateY(-50%)")
+        .style("right", "20px");
+    } else if (!selectedCategory) {
+      // Top view with no category: where stats panel would be
+      tooltip
+        .style("top", "180px")
+        .style("right", "20px")
+        .style("transform", "none");
+    } else {
+      // Top view with category: under stats panel (existing position)
+      tooltip
+        .style("top", "620px")
+        .style("right", "20px")
+        .style("transform", "none");
+    }
+
     tooltip
       .style("opacity", 1)
       .html(`
-        <div class="tooltip-header">
-          <img src="icons8-close-window-50-2.png" />
-          <img src="icons8-maximize-window-50-2.png" />
-          <img src="icons8-minimize-window-50-2.png" />
-          <span class="tooltip-title">${d.title}</span>
+        <div style="display: flex; flex-direction: column; height: 100%; justify-content: space-between; position: relative;">
+          <button id="tooltip-close-btn" style="position: absolute; top: 5px; right: 5px; background: #000000; border: 1px solid #FFF; color: #FFF; font-size: 24px; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; z-index: 1000; border-radius: 8px;" onclick="console.log('Button clicked directly')">×</button>
+          <div>
+            <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 35px; font-weight: 600; color: #FFF; margin-bottom: 16px;">${d.title}</div>
+            <div style="margin-bottom: 20px;">
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">GENRE</div>
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${(d.genre || "Unknown").replace(/^MUSIC\s*:\s*/i, '')}</div>
+            </div>
+            <div style="margin-bottom: 20px;">
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">LIFE SPAN</div>
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${lifespan}</div>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <div style="flex: 1;">
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">First seen:</div>
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${formattedFirst}</div>
+            </div>
+            <div style="width: 1px; background: #FFF; margin: 0 16px;"></div>
+            <div style="flex: 1;">
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 18px; font-weight: 500; color: #FFF; margin-bottom: 4px;">Last seen:</div>
+              <div style="font-family: 'Neue Haas Grotesk Display Pro', sans-serif; font-size: 25px; font-weight: 600; color: #FFF;">${formattedLast}</div>
+            </div>
+          </div>
         </div>
-        <div class="tooltip-content">
-          <div><strong>Genre:</strong> ${d.genre || "Unknown"} | ${d.category || "Uncategorized"}</div>
-          <div><strong>First seen:</strong> ${formattedFirst}</div>
-          <div><strong>Last seen:</strong> ${formattedLast}</div>
-          <div><strong>Lifespan:</strong> ${lifespan}</div>
-        </div>
-      `)
-      .style("left", (event.pageX + 12) + "px")
-      .style("top", (event.pageY - 10) + "px");
+      `);
+
 
     d3.select(this).raise();
   });
 
-  // Scrubber
-  const scrubberWidth = 420, scrubberHeight = 26, scrubberMargin = 60, knobRadius = 12;
+  // HTML Timeline Slider
+  const timelineContainer = document.getElementById("timeline-container");
+  const timelineHandle = document.getElementById("timeline-handle");
+  const timelineFill = document.getElementById("timeline-fill");
+  const currentDateLabel = document.getElementById("current-date");
 
-  const scrubberGroup = svg.append("g")
-    .attr("transform", `translate(${width - scrubberWidth - scrubberMargin},${scrubberMargin})`)
-    .style("cursor", "pointer")
-    .style("user-select", "none");
+  // Hide timeline on bottom view
+  if (isBottomView && timelineContainer) {
+    timelineContainer.style.display = "none";
+  }
 
-  scrubberGroup.append("rect")
-    .attr("x", 0).attr("y", (scrubberHeight - knobRadius) / 2)
-    .attr("rx", 12).attr("width", scrubberWidth).attr("height", knobRadius)
-    .attr("fill", "#444");
+  // Hide current date on bottom view
+  if (isBottomView && currentDateLabel) {
+    currentDateLabel.style.display = "none";
+  }
+  const startDateLabel = document.getElementById("start-date");
+  const endDateLabel = document.getElementById("end-date");
+  const timelineTrack = document.querySelector(".timeline-track");
+  const playPauseBtn = document.getElementById("play-pause-btn");
 
-  const fillRect = scrubberGroup.append("rect")
-    .attr("x", 0).attr("y", (scrubberHeight - knobRadius) / 2)
-    .attr("rx", 12).attr("width", 0).attr("height", knobRadius)
-    .attr("fill", "#22e0ff");
-
-
-  const knob = scrubberGroup.append("image")
-    .attr("class", "scrubber-music-knob")
-    .attr("xlink:href", "music-note.png")
-    .attr("x", -knobRadius)
-    .attr("y", -knobRadius)
-    .attr("width", knobRadius * 2.2)
-    .attr("height", knobRadius * 2 + 10);
-
-  // Decorative note bits
-  knob.append("ellipse").attr("cx", 0).attr("cy", 10).attr("rx", knobRadius).attr("ry", knobRadius * 0.85)
-    .attr("fill", "#22e0ff").attr("stroke", "#fff").attr("stroke-width", 2).attr("filter", "url(#glow)");
-  knob.append("rect").attr("x", -2).attr("y", -18).attr("width", 4).attr("height", 28).attr("rx", 2)
-    .attr("fill", "#fff").attr("stroke", "#22e0ff").attr("stroke-width", 0.7);
-  knob.append("path").attr("d", "M2,-18 Q18,-26 2,-8")
-    .attr("fill", "none").attr("stroke", "#22e0ff").attr("stroke-width", 3).attr("stroke-linecap", "round");
-
-  // Start/end labels
-  scrubberGroup.append("text").attr("x", 0).attr("y", -6).attr("fill", "#bbb").attr("font-size", 13).attr("font-family", "monospace").text("Jan 1996");
-  scrubberGroup.append("text").attr("x", scrubberWidth).attr("y", -6).attr("fill", "#bbb").attr("font-size", 13).attr("font-family", "monospace").attr("text-anchor", "end").text("Dec 2024");
-
-  const scrubberTimeLabel = scrubberGroup.append("text")
-    .attr("x", scrubberWidth / 2).attr("y", scrubberHeight + 25)
-    .attr("fill", "#b6e3ef").attr("font-size", "14px").attr("font-family", "monospace").attr("font-weight", 500)
-    .attr("opacity", 1).attr("text-anchor", "middle")
-    .text("January 1996");
+  // Get dynamic timeline width
+  function getTimelineWidth() {
+    return timelineTrack.offsetWidth;
+  }
 
   // Scrubbing logic
   let dragging = false, scrubMonth = 0;
   const speed = 2;
   let offsetMonths = 0;
+  let isPaused = false;
 
   // --- SYNC HELPERS (localStorage across top/bottom windows) ---
   let lastBroadcastedMonth = null;
@@ -660,7 +688,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     const now = performance.now();
     offsetMonths = newMonth - ((now - lastResetTime) / 1000) * speed;
     scrubMonth = newMonth;
-    updateScrubberUI();
+    updateTimelineUI();
   }
 
   window.addEventListener("storage", (e) => {
@@ -691,32 +719,61 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   });
 
 
-  scrubberGroup.on("mousedown", function (event) {
+  // Timeline event handlers
+  timelineTrack.addEventListener("mousedown", function (event) {
     dragging = true;
     isScrubbingManually = true;
     lastResetTime = performance.now();
-    setScrub(d3.pointer(event, this)[0]);
+    setScrub(event.offsetX);
     event.preventDefault();
   });
-  d3.select(window).on("mousemove", (event) => { if (dragging) { setScrub(d3.pointer(event, scrubberGroup.node())[0]); } });
-  d3.select(window).on("mouseup", () => {
+
+  document.addEventListener("mousemove", (event) => {
+    if (dragging) {
+      const rect = timelineTrack.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      setScrub(x);
+    }
+  });
+
+  document.addEventListener("mouseup", () => {
     if (dragging) {
       dragging = false;
       isScrubbingManually = false;
       const now = performance.now();
-      // Set offset so that rawMonth = scrubMonth when t = 0 (immediately after reset)
       offsetMonths = scrubMonth;
-      lastResetTime = now; // Reset the animation clock to current time
+      lastResetTime = now;
     }
   });
 
-
-
   function setScrub(x) {
-    x = Math.max(0, Math.min(x, scrubberWidth));
-    const frac = x / scrubberWidth;
+    const timelineWidth = getTimelineWidth();
+    x = Math.max(0, Math.min(x, timelineWidth));
+    const frac = x / timelineWidth;
     scrubMonth = Math.round(frac * (totalMonths - 1));
-    updateScrubberUI();
+    updateTimelineUI();
+
+    // Update offset to match the scrubbed position
+    offsetMonths = scrubMonth;
+    // Reset animation time to match scrubbed position
+    animationStartTime = performance.now();
+    pausedTime = 0;
+
+    // If paused, immediately update the animation to show the new position
+    if (isPaused) {
+      displayedMonthsElapsed = scrubMonth;
+      // Force update of all points to reflect the new time position
+      points.forEach(p => {
+        const pointTime = p.lastMonthIndex;
+        if (pointTime !== null && pointTime <= scrubMonth) {
+          p.hasFallen = true;
+          p.fallFade = Math.max(0, 1 - (scrubMonth - pointTime) * 0.01);
+        } else {
+          p.hasFallen = false;
+          p.fallFade = 1;
+        }
+      });
+    }
 
     // Broadcast to the other window while dragging
     if (scrubMonth !== lastBroadcastedMonth) {
@@ -725,12 +782,29 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     }
   }
 
+  let lastUpdateMonth = -1; // Track last updated month to avoid unnecessary updates
 
-  function updateScrubberUI() {
-    const frac = scrubMonth / (totalMonths - 1);
-    knob.attr("transform", `translate(${frac * scrubberWidth},${scrubberHeight / 2})`);
-    fillRect.attr("width", frac * scrubberWidth);
-    scrubberTimeLabel.text(getTimeLabel(scrubMonth));
+  function updateTimelineUI() {
+    // Only update if the month has actually changed
+    if (scrubMonth !== lastUpdateMonth) {
+      const frac = scrubMonth / (totalMonths - 1);
+
+      // Disable transitions during manual dragging for immediate response
+      if (dragging) {
+        timelineHandle.style.transition = 'none';
+        timelineFill.style.transition = 'none';
+      } else {
+        timelineHandle.style.transition = 'left 0.6s linear';
+        timelineFill.style.transition = 'transform 0.6s linear';
+      }
+
+      // Use left positioning for handle and scaleX for fill
+      timelineHandle.style.left = `${frac * 100}%`;
+      timelineFill.style.transform = `scaleX(${frac})`;
+      timelineFill.style.transformOrigin = 'left';
+      currentDateLabel.textContent = getTimeLabel(scrubMonth);
+      lastUpdateMonth = scrubMonth;
+    }
   }
 
   // Clear any stored time to ensure fresh start
@@ -739,14 +813,33 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   // Ensure slider starts at the beginning
   scrubMonth = 0;
 
-  updateScrubberUI();
+  // Initialize timeline labels
+  startDateLabel.textContent = getTimeLabel(0);
+  endDateLabel.textContent = getTimeLabel(totalMonths - 1);
+  updateTimelineUI();
+
+  // Play/Pause button functionality
+  playPauseBtn.addEventListener("click", () => {
+    isPaused = !isPaused;
+    if (isPaused) {
+      playPauseBtn.classList.add("paused");
+      lastPauseTime = performance.now(); // Track when paused
+    } else {
+      playPauseBtn.classList.remove("paused");
+      lastPauseTime = null; // Clear pause tracking when resumed
+    }
+  });
 
 
-  // NEW: also adopt any existing selection on boot
-  const bootCategory = localStorage.getItem("vizCategory") || "";
-  const bootType2 = localStorage.getItem("vizType2") || "";
-  selectedCategory = bootCategory ? bootCategory : null;
-  selectedType2 = bootType2 ? bootType2 : null;
+  // Reset category selection and tooltip on page refresh
+  localStorage.setItem("vizCategory", "");
+  localStorage.setItem("vizType2", "");
+  selectedCategory = null;
+  selectedType2 = null;
+
+  // Hide tooltip on refresh
+  tooltip.style("opacity", 0);
+
   updateCategoryHighlight();
 
 
@@ -757,12 +850,220 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   }
   function getTimeLabel(monthIdx) {
     const { monthIndex, year } = getMonthYear(monthIdx);
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     return `${monthNames[monthIndex]} ${year}`;
   }
 
   // Animation
   let maxMonthSeen = 0;
+
+  function animate(now) {
+    // If paused, just render current state without updating time
+    if (isPaused) {
+      dots
+        .attr("cx", d => d._drawX)
+        .attr("cy", d => d._drawY)
+        .attr("r", d => {
+          const baseR = 6.0;
+          const monthsLeft = d.lastMonthIndex - scrubMonth;
+          if (
+            !d.hasFallen &&
+            d.lastMonthIndex != null &&
+            d.lastMonthIndex < 348 &&
+            monthsLeft <= 3 &&
+            monthsLeft >= 0
+          ) {
+            const time = now / 800;
+            const raw = Math.sin(time + d.phase);
+            const eased = raw < 0 ? 1 + 0.3 * raw : 1;
+            return baseR * eased;
+          }
+          return (selectedPoint === d) ? baseR + 2 : baseR;
+        })
+        .attr("stroke", d => (selectedPoint === d) ? "#fff" : "none")
+        .attr("stroke-width", d => (selectedPoint === d) ? 1.5 : 0)
+        .attr("fill-opacity", d => {
+          let match = true;
+          if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
+          if (selectedType2) match = d.type2 === selectedType2;
+          let opacity = d.baseOpacity * (match ? 1 : 0.1);
+          if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
+          if (selectedPoint === d) opacity = 1;
+          return opacity;
+        })
+        .attr("fill", "#aaffff");
+
+      requestAnimationFrame(animate);
+      return;
+    }
+
+    const t = now - lastResetTime;
+    const rawMonth = ((t / 1000) * speed + offsetMonths);
+    const realMonthsElapsed = Math.floor(rawMonth);
+    let displayedMonthsElapsed;
+    const currentMonth = realMonthsElapsed;
+
+    if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
+      if (!pauseStarted) { pauseStarted = true; }
+      if (!pauseStartTime) pauseStartTime = performance.now();
+
+      const timePaused = performance.now() - pauseStartTime;
+      if (timePaused < pauseDurationMs) {
+        displayedMonthsElapsed = totalMonths - 1;
+      } else {
+        // reset
+        pauseStarted = false; pauseStartTime = null; offsetMonths = 0; lastResetTime = performance.now();
+        points.forEach(p => { p.hasFallen = false; p.fallStartTime = null; p.fallFade = 1; });
+      }
+    } else {
+      pauseStarted = false;
+      displayedMonthsElapsed = realMonthsElapsed;
+    }
+
+    // Always use this frame's value of realMonthsElapsed for everything
+    scrubMonth = displayedMonthsElapsed;
+    updateTimelineUI();
+
+    // Sync across windows (but only if animation is running, not during manual scrub)
+    if (!isScrubbingManually && scrubMonth !== lastBroadcastedMonth) {
+      localStorage.setItem("vizTime", String(scrubMonth));
+      lastBroadcastedMonth = scrubMonth;
+    }
+
+    if (displayedMonthsElapsed > maxMonthSeen) maxMonthSeen = displayedMonthsElapsed;
+
+    // Update current date label but throttle it (only if not paused)
+    if (!isPaused && Math.floor(now / 100) % 5 === 0) {
+      const newTimeLabel = getTimeLabel(scrubMonth);
+      if (currentDateLabel.textContent !== newTimeLabel) {
+        currentDateLabel.textContent = newTimeLabel;
+      }
+    }
+
+    const fallDuration = 1.2;
+    const fps = 60;
+    const fallFrames = Math.round(fallDuration * fps);
+
+    points.forEach(p => {
+      if (selectedPoint === p && selectedFrozen) {
+        p._drawX = selectedFrozen.x; p._drawY = selectedFrozen.y; p._drawZ = selectedFrozen.z; p.fallFade = 1;
+        return;
+      }
+      if (!p.hasFallen && p.lastMonthIndex != null && realMonthsElapsed >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
+        p.hasFallen = true; p.fallY = 0; p.fallStartMonth = Math.max(p.lastMonthIndex, 0);
+      }
+      if (p.hasFallen) {
+        let sinceFall = Math.max(0, Math.min(realMonthsElapsed - p.fallStartMonth, fallFrames));
+        let tNorm = sinceFall / fallFrames;
+        const ease = 1 - Math.pow(1 - tNorm, 3);
+
+        p.fallFade = 1 - 0.65 * tNorm;
+        if (tNorm >= 1) p.fallFade = 0.35;
+
+        const rowDots = p.pileRowDots;
+        const pileX = (p.pileCol - (rowDots - 1) / 2) * pileSpacingX;
+        const pileY = groundY - (p.numRows - 1 - p.pileRow) * pileSpacingY;
+
+        p._drawX = p.x + (pileX - p.x) * ease;
+        p._drawY = p.y + (pileY - p.y) * ease;
+        p._drawZ = p.z;
+      } else {
+        const rotY = Math.sin(t / 7000) * 0.5;
+        const rotX = Math.cos(t / 5000) * 0.5;
+        const rx = p.x * Math.cos(rotY) - p.z * Math.sin(rotY);
+        const rz = p.x * Math.sin(rotY) + p.z * Math.cos(rotY);
+        const ry = p.y * Math.cos(rotX) - rz * Math.sin(rotX);
+        const finalZ = p.y * Math.sin(rotX) + rz * Math.cos(rotX);
+        p._drawX = rx; p._drawY = ry; p._drawZ = finalZ; p.fallFade = 1;
+      }
+    });
+
+    dots
+      .attr("cx", d => d._drawX)
+      .attr("cy", d => d._drawY)
+      .attr("r", d => {
+        const baseR = 6.0;
+        const monthsLeft = d.lastMonthIndex - scrubMonth;
+
+        if (
+          !d.hasFallen &&
+          d.lastMonthIndex != null &&
+          d.lastMonthIndex < 348 &&
+          monthsLeft <= 3 &&
+          monthsLeft >= 0
+        ) {
+          const time = now / 800;
+          const raw = Math.sin(time + d.phase);
+          const eased = raw < 0 ? 1 + 0.3 * raw : 1;
+          return baseR * eased;
+        }
+
+        return (selectedPoint === d) ? baseR + 2 : baseR;
+      })
+      .attr("stroke", d => (selectedPoint === d) ? "#fff" : "none")
+      .attr("stroke-width", d => (selectedPoint === d) ? 1.5 : 0)
+      .attr("fill-opacity", d => {
+        let match = true;
+        if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
+        if (selectedType2) match = d.type2 === selectedType2;
+
+        let opacity = d.baseOpacity * (match ? 1 : 0.1);
+
+        if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
+        if (selectedPoint === d) opacity = 1;
+
+        return opacity;
+      })
+      .attr("fill", "#aaffff");
+
+    lines
+      .attr("x1", d => d.source._drawX)
+      .attr("y1", d => d.source._drawY)
+      .attr("x2", d => d.target._drawX)
+      .attr("y2", d => d.target._drawY)
+      .attr("stroke-opacity", d => 0.02 + 0.03 * Math.sin(now / 1000 + d.phase));
+
+    function getSphereBoundary(p, radius, mult = 1.1) {
+      const d = Math.sqrt(p._drawX * p._drawX + p._drawY * p._drawY + p._drawZ * p._drawZ);
+      if (d === 0) return { x: 0, y: 0 };
+      return { x: p._drawX / d * radius * mult, y: p._drawY / d * radius * mult };
+    }
+
+    const liveStrings = strings.filter(d => !(d.source.hasFallen && d.target.hasFallen));
+    const curves = g.selectAll(".string")
+      .data(liveStrings, d => `${d.source.id}-${d.target.id}`)
+      .join(
+        enter => enter.append("path")
+          .attr("class", "string")
+          .attr("fill", "none")
+          .attr("stroke", "#aaccff")
+          .attr("stroke-opacity", 0.1)
+          .attr("stroke-width", 1.0)
+          .attr("stroke-linecap", "round"),
+        update => update,
+        exit => exit.remove()
+      );
+
+    curves
+      .attr("d", d => {
+        function endpoint(p) {
+          if (!p.hasFallen) return { x: p._drawX, y: p._drawY };
+          const dlen = Math.sqrt(p._drawX * p._drawX + p._drawY * p._drawY + p._drawZ * p._drawZ);
+          if (dlen < radius) return { x: p._drawX, y: p._drawY };
+          return getSphereBoundary(p, radius);
+        }
+        const p1 = endpoint(d.source);
+        const p2 = endpoint(d.target);
+        const mx = (p1.x + p2.x) / 2 + Math.sin(now / 800 + d.phase) * 10;
+        const my = (p1.y + p2.y) / 2 + Math.cos(now / 800 + d.phase) * 10;
+        return `M${p1.x},${p1.y} Q${mx},${my} ${p2.x},${p2.y}`;
+      })
+      .attr("stroke-opacity", d => 0.06 + 0.06 * Math.abs(Math.sin(now / 1200 + d.phase)));
+
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
 
   // Fast easing function (replaces Math.pow for better performance)
   function fastEaseOutCubic(t) {
@@ -822,227 +1123,4 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   }
 
   maybeApplySelection();
-
-  function animate(now) {
-    const t = now - lastResetTime;
-    const rawMonth = ((t / 1000) * speed + offsetMonths);
-    const realMonthsElapsed = Math.floor(rawMonth);
-    let displayedMonthsElapsed;
-    const currentMonth = realMonthsElapsed;
-
-    // Use continuous time for smooth falling animation
-    let continuousTime = rawMonth;
-
-    // When scrubbing manually, use the slider position for animation timing
-    if (isScrubbingManually) {
-      continuousTime = scrubMonth;
-    }
-
-    if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
-      if (!pauseStarted) { pauseStarted = true; }
-      if (!pauseStartTime) pauseStartTime = performance.now();
-
-      const timePaused = performance.now() - pauseStartTime;
-      if (timePaused < pauseDurationMs) {
-        displayedMonthsElapsed = totalMonths - 1;
-      } else {
-        // reset
-        pauseStarted = false; pauseStartTime = null; offsetMonths = 0; lastResetTime = performance.now();
-        points.forEach(p => { p.hasFallen = false; p.fallStartTime = null; p.fallFade = 1; });
-      }
-    } else {
-      pauseStarted = false;
-      displayedMonthsElapsed = realMonthsElapsed;
-    }
-
-    // Only update scrubMonth if not manually scrubbing
-    if (!isScrubbingManually) {
-      scrubMonth = displayedMonthsElapsed;
-      updateScrubberUI();
-    }
-
-    // Sync across windows (but only if animation is running, not during manual scrub)
-    if (!isScrubbingManually && scrubMonth !== lastBroadcastedMonth) {
-      localStorage.setItem("vizTime", String(scrubMonth));
-      lastBroadcastedMonth = scrubMonth;
-    }
-
-
-    if (displayedMonthsElapsed > maxMonthSeen) maxMonthSeen = displayedMonthsElapsed;
-
-    // Use scrubMonth for time display to show current position
-    timeLabel.text(getTimeLabel(scrubMonth));
-    scrubberTimeLabel.text(getTimeLabel(scrubMonth));
-
-    // Smooth falling animation parameters (now using per-point variation)
-
-    // Cache rotation calculations (only recalculate if time changed significantly)
-    if (Math.abs(t - lastRotationTime) > 16) { // ~60fps threshold
-      lastRotationTime = t;
-      cachedRotY = Math.sin(t / 27000) * 0.5;
-      cachedRotX = Math.cos(t / 20000) * 0.5;
-      cachedCosY = Math.cos(cachedRotY);
-      cachedSinY = Math.sin(cachedRotY);
-      cachedCosX = Math.cos(cachedRotX);
-      cachedSinX = Math.sin(cachedRotX);
-    }
-
-    points.forEach(p => {
-      if (selectedPoint === p && selectedFrozen) {
-        p._drawX = selectedFrozen.x; p._drawY = selectedFrozen.y; p._drawZ = selectedFrozen.z; p.fallFade = 1;
-        return;
-      }
-
-      // Check if point should start falling using actual data timing
-      if (!p.hasFallen && p.lastMonthIndex != null && continuousTime >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
-        p.hasFallen = true;
-        p.fallStartTime = continuousTime; // Store continuous time for smooth animation
-      }
-
-      if (p.hasFallen) {
-        // Use continuous time for smooth interpolation
-        const timeSinceFall = Math.max(0, continuousTime - p.fallStartTime);
-        const tNorm = Math.min(timeSinceFall / p.fallDuration, 1);
-        const ease = 1 - (1 - tNorm) * (1 - tNorm); // Gentle quadratic ease-out
-
-        p.fallFade = 1 - 0.65 * tNorm;
-        if (tNorm >= 1) p.fallFade = 0.35;
-
-        // Use pre-calculated pile positions with smooth interpolation
-        p._drawX = p.x + (p.pileX - p.x) * ease;
-        p._drawY = p.y + (p.pileY - p.y) * ease;
-        p._drawZ = p.z;
-      } else {
-        // Use cached rotation values for non-falling points
-        const rx = p.x * cachedCosY - p.z * cachedSinY;
-        const rz = p.x * cachedSinY + p.z * cachedCosY;
-        const ry = p.y * cachedCosX - rz * cachedSinX;
-        const finalZ = p.y * cachedSinX + rz * cachedCosX;
-        p._drawX = rx; p._drawY = ry; p._drawZ = finalZ; p.fallFade = 1;
-      }
-    });
-
-    dots
-      .attr("cx", d => d._drawX)
-      .attr("cy", d => d._drawY)
-      .attr("r", d => {
-        //const baseR = d.debugFirstFaller ? 7 : 4.5;
-        const baseR = 6.0; // Increased from 4.5 to 6.0 for easier clicking
-        const monthsLeft = d.lastMonthIndex - scrubMonth;
-
-        if (
-          !d.hasFallen && // Only pulse points that haven't fallen yet
-          d.lastMonthIndex != null &&
-          d.lastMonthIndex < 348 &&
-          monthsLeft <= 3 &&
-          monthsLeft >= 0
-        ) {
-          // Slow inward pulse: 0.6x to 1x of base size, with easing
-          const t = now / 800; // Use cached 'now' for better performance
-          const raw = Math.sin(t + d.phase); // base wave
-          const eased = raw < 0
-            ? 1 + 0.3 * raw // Shrink to 70% and pause slightly at low
-            : 1;            // Hold full size when above baseline
-
-          return baseR * eased;
-        }
-
-        return (selectedPoint === d) ? baseR + 2 : baseR;
-      })
-
-
-
-
-      .attr("stroke", d => (selectedPoint === d) ? "#fff" : "none")
-      .attr("stroke-width", d => (selectedPoint === d) ? 1.5 : 0)
-      .attr("fill-opacity", d => {
-        let match = true;
-        if (selectedCategory && !selectedType2) match = d.category === selectedCategory;
-        if (selectedType2) match = d.type2 === selectedType2;
-
-        let opacity = d.baseOpacity * (match ? 1 : 0.1);
-
-        if (d.hasFallen) opacity *= (d.fallFade ?? 0.35);
-        if (selectedPoint === d) opacity = 1;
-
-        return opacity;
-      })
-
-
-
-      /*.attr("filter", d => {
-        const monthsLeft = d.lastMonthIndex - scrubMonth;
-
-        if (
-          d.lastMonthIndex != null &&
-          d.lastMonthIndex < 348 &&
-          monthsLeft <= 3 &&
-          monthsLeft >= 0
-        ) {
-          return "url(#flicker-glow)";
-        }
-
-        return null;
-      })*/
-
-
-
-
-
-      //.attr("fill", d => d.debugFirstFaller ? "red" : "#aaffff");
-      .attr("fill", "#aaffff");
-
-
-
-
-    lines
-      .attr("x1", d => d.source._drawX)
-      .attr("y1", d => d.source._drawY)
-      .attr("x2", d => d.target._drawX)
-      .attr("y2", d => d.target._drawY)
-      .attr("stroke-opacity", d => 0.02 + 0.03 * Math.sin(now / 1000 + d.phase));
-
-    function getSphereBoundary(p, radius, mult = 1.1) {
-      const d = Math.sqrt(p._drawX * p._drawX + p._drawY * p._drawY + p._drawZ * p._drawZ);
-      if (d === 0) return { x: 0, y: 0 };
-      return { x: p._drawX / d * radius * mult, y: p._drawY / d * radius * mult };
-    }
-
-    const liveStrings = strings.filter(d => !(d.source.hasFallen && d.target.hasFallen));
-    const curves = g.selectAll(".string")
-      .data(liveStrings, d => `${d.source.id}-${d.target.id}`)
-      .join(
-        enter => enter.append("path")
-          .attr("class", "string")
-          .attr("fill", "none")
-          .attr("stroke", "#aaccff")
-          .attr("stroke-opacity", 0.1)
-          .attr("stroke-width", 1.0)
-          .attr("stroke-linecap", "round"),
-        update => update,
-        exit => exit.remove()
-      );
-
-    curves
-      .attr("d", d => {
-        function endpoint(p) {
-          if (!p.hasFallen) return { x: p._drawX, y: p._drawY };
-          const dlen = Math.sqrt(p._drawX * p._drawX + p._drawY * p._drawY + p._drawZ * p._drawZ);
-          if (dlen < radius) return { x: p._drawX, y: p._drawY };
-          return getSphereBoundary(p, radius);
-        }
-        const p1 = endpoint(d.source);
-        const p2 = endpoint(d.target);
-        const mx = (p1.x + p2.x) / 2 + Math.sin(now / 800 + d.phase) * 10;
-        const my = (p1.y + p2.y) / 2 + Math.cos(now / 800 + d.phase) * 10;
-        return `M${p1.x},${p1.y} Q${mx},${my} ${p2.x},${p2.y}`;
-      })
-      .attr("stroke-opacity", d => 0.06 + 0.06 * Math.abs(Math.sin(now / 1200 + d.phase)));
-
-    requestAnimationFrame(animate);
-  }
-
-  requestAnimationFrame(animate);
 });
-
-
