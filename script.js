@@ -206,6 +206,14 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     };
   });
 
+  // Initialize draw positions so the full sphere renders immediately (even if paused briefly)
+  points.forEach(p => {
+    p._drawX = p.x;
+    p._drawY = p.y;
+    p._drawZ = p.z;
+    p.fallFade = 1;
+  });
+
   // Links/strings
   const links = [], strings = [];
   const maxLinks = 1500, maxStrings = 300;
@@ -847,26 +855,23 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     }
   }
 
-  // Clear any stored time to ensure fresh start
+  // Fresh start: clear any prior sync and start playing immediately
   localStorage.removeItem("vizTime");
+  localStorage.setItem("vizPaused", "0");
 
-  // Ensure slider starts at the beginning
+  // Start at the beginning and in PLAY state
   scrubMonth = 0;
+  isPaused = false;
+  playPauseBtn.classList.remove("paused");
+  pausedMonth = 0;
+  offsetMonths = 0;
+  lastResetTime = performance.now();
 
   // Initialize timeline labels
   startDateLabel.textContent = getTimeLabel(0);
   endDateLabel.textContent = getTimeLabel(totalMonths - 1);
+  if (currentDateLabel) currentDateLabel.textContent = getTimeLabel(scrubMonth || 0);
   updateTimelineUI();
-
-  // Adopt global paused state if another window set it
-  const pausedFlag = localStorage.getItem("vizPaused");
-  if (pausedFlag === "1") {
-    isPaused = true;
-    playPauseBtn.classList.add("paused");
-    pausedMonth = scrubMonth;
-    lastResetTime = performance.now();
-    offsetMonths = pausedMonth; // lock time in place while paused
-  }
 
   // Play/Pause button functionality
   playPauseBtn.addEventListener("click", () => {
@@ -913,9 +918,18 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     return { monthIndex, year, total: monthIdx };
   }
   function getTimeLabel(monthIdx) {
+    // Guard against undefined/NaN and clamp to valid range
+    if (!Number.isFinite(monthIdx)) monthIdx = 0;
+    monthIdx = Math.max(0, Math.min(totalMonths - 1, Math.floor(monthIdx)));
+
     const { monthIndex, year } = getMonthYear(monthIdx);
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-    return `${monthNames[monthIndex]} ${year}`;
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    // Extra guard in case monthIndex somehow falls outside 0..11
+    const safeMonth = monthNames[(monthIndex % 12 + 12) % 12] || monthNames[0];
+    return `${safeMonth} ${year}`;
   }
 
   // Animation
