@@ -683,6 +683,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   let lastBroadcastedMonth = null;
 
   function applySyncedTime(newMonth) {
+    if (isPaused) return; // ignore external time updates while paused
     if (!isFinite(newMonth)) return;
     // Align animation so that this month shows immediately and continues smoothly
     const now = performance.now();
@@ -697,6 +698,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
     // Time sync
     if (e.key === "vizTime") {
+      if (isPaused || dragging) return; // do not move the scrubber while paused or dragging
       const m = parseFloat(e.newValue);
       if (!isNaN(m) && m !== scrubMonth) {
         applySyncedTime(m);
@@ -789,8 +791,9 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     if (scrubMonth !== lastUpdateMonth) {
       const frac = scrubMonth / (totalMonths - 1);
 
-      // Disable transitions during manual dragging for immediate response
-      if (dragging) {
+      // Disable transitions during manual dragging or pause for immediate response
+      if (dragging || isPaused) {
+        // Freeze visually while paused or scrubbing
         timelineHandle.style.transition = 'none';
         timelineFill.style.transition = 'none';
       } else {
@@ -802,7 +805,12 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       timelineHandle.style.left = `${frac * 100}%`;
       timelineFill.style.transform = `scaleX(${frac})`;
       timelineFill.style.transformOrigin = 'left';
-      currentDateLabel.textContent = getTimeLabel(scrubMonth);
+
+      // Only update date label if not paused
+      if (!isPaused) {
+        currentDateLabel.textContent = getTimeLabel(scrubMonth);
+      }
+
       lastUpdateMonth = scrubMonth;
     }
   }
@@ -820,13 +828,28 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Play/Pause button functionality
   playPauseBtn.addEventListener("click", () => {
+    const nowTs = performance.now();
     isPaused = !isPaused;
+
     if (isPaused) {
+      // Entering pause: remember when we paused so we can offset master time on resume
       playPauseBtn.classList.add("paused");
-      lastPauseTime = performance.now(); // Track when paused
+      lastPauseTime = nowTs;
     } else {
+      // Leaving pause: shift the master clock forward by the paused duration
+      // so that (now - lastResetTime) ignores time spent paused.
       playPauseBtn.classList.remove("paused");
-      lastPauseTime = null; // Clear pause tracking when resumed
+      if (lastPauseTime != null) {
+        const pausedDuration = nowTs - lastPauseTime;
+        // Advance lastResetTime by the paused duration to "freeze" elapsed time
+        lastResetTime += pausedDuration;
+        lastPauseTime = null;
+      }
+
+      // Also ensure the scrubber reflects the current logical time immediately
+      // without a jump due to any pending CSS transition.
+      // (No month change here; we only refresh UI positioning.)
+      updateTimelineUI();
     }
   });
 
@@ -897,32 +920,37 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       return;
     }
 
-    const t = now - lastResetTime;
-    const rawMonth = ((t / 1000) * speed + offsetMonths);
-    const realMonthsElapsed = Math.floor(rawMonth);
-    let displayedMonthsElapsed;
-    const currentMonth = realMonthsElapsed;
+    // Only calculate time if not paused
+    let displayedMonthsElapsed = scrubMonth; // Default to current scrubMonth when paused
+    let t = 0; // Default to 0 when paused
 
-    if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
-      if (!pauseStarted) { pauseStarted = true; }
-      if (!pauseStartTime) pauseStartTime = performance.now();
+    if (!isPaused) {
+      t = now - lastResetTime;
+      const rawMonth = ((t / 1000) * speed + offsetMonths);
+      const realMonthsElapsed = Math.floor(rawMonth);
+      const currentMonth = realMonthsElapsed;
 
-      const timePaused = performance.now() - pauseStartTime;
-      if (timePaused < pauseDurationMs) {
-        displayedMonthsElapsed = totalMonths - 1;
+      if (realMonthsElapsed >= totalMonths - 1 && !isScrubbingManually) {
+        if (!pauseStarted) { pauseStarted = true; }
+        if (!pauseStartTime) pauseStartTime = performance.now();
+
+        const timePaused = performance.now() - pauseStartTime;
+        if (timePaused < pauseDurationMs) {
+          displayedMonthsElapsed = totalMonths - 1;
+        } else {
+          // reset
+          pauseStarted = false; pauseStartTime = null; offsetMonths = 0; lastResetTime = performance.now();
+          points.forEach(p => { p.hasFallen = false; p.fallStartTime = null; p.fallFade = 1; });
+        }
       } else {
-        // reset
-        pauseStarted = false; pauseStartTime = null; offsetMonths = 0; lastResetTime = performance.now();
-        points.forEach(p => { p.hasFallen = false; p.fallStartTime = null; p.fallFade = 1; });
+        pauseStarted = false;
+        displayedMonthsElapsed = realMonthsElapsed;
       }
-    } else {
-      pauseStarted = false;
-      displayedMonthsElapsed = realMonthsElapsed;
-    }
 
-    // Always use this frame's value of realMonthsElapsed for everything
-    scrubMonth = displayedMonthsElapsed;
-    updateTimelineUI();
+      // Update scrubMonth and timeline
+      scrubMonth = displayedMonthsElapsed;
+      updateTimelineUI();
+    }
 
     // Sync across windows (but only if animation is running, not during manual scrub)
     if (!isScrubbingManually && scrubMonth !== lastBroadcastedMonth) {
@@ -941,7 +969,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
     }
 
     // Smooth falling animation with continuous time
-    const continuousTime = rawMonth; // Use continuous time for smooth interpolation
+    const continuousTime = isPaused ? scrubMonth : ((now - lastResetTime) / 1000) * speed + offsetMonths; // Use current scrubMonth when paused
 
     points.forEach(p => {
       if (selectedPoint === p && selectedFrozen) {
