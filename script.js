@@ -940,36 +940,38 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       }
     }
 
-    const fallDuration = 1.2;
-    const fps = 60;
-    const fallFrames = Math.round(fallDuration * fps);
+    // Smooth falling animation with continuous time
+    const continuousTime = rawMonth; // Use continuous time for smooth interpolation
 
     points.forEach(p => {
       if (selectedPoint === p && selectedFrozen) {
         p._drawX = selectedFrozen.x; p._drawY = selectedFrozen.y; p._drawZ = selectedFrozen.z; p.fallFade = 1;
         return;
       }
-      if (!p.hasFallen && p.lastMonthIndex != null && realMonthsElapsed >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
-        p.hasFallen = true; p.fallY = 0; p.fallStartMonth = Math.max(p.lastMonthIndex, 0);
+
+      // Check if point should start falling using actual data timing
+      if (!p.hasFallen && p.lastMonthIndex != null && continuousTime >= p.lastMonthIndex && p.lastMonthIndex < totalMonths) {
+        p.hasFallen = true;
+        p.fallStartTime = continuousTime; // Store continuous time for smooth animation
       }
+
       if (p.hasFallen) {
-        let sinceFall = Math.max(0, Math.min(realMonthsElapsed - p.fallStartMonth, fallFrames));
-        let tNorm = sinceFall / fallFrames;
-        const ease = 1 - Math.pow(1 - tNorm, 3);
+        // Use continuous time for smooth interpolation
+        const timeSinceFall = Math.max(0, continuousTime - p.fallStartTime);
+        const tNorm = Math.min(timeSinceFall / p.fallDuration, 1);
+        const ease = 1 - (1 - tNorm) * (1 - tNorm); // Gentle quadratic ease-out
 
         p.fallFade = 1 - 0.65 * tNorm;
         if (tNorm >= 1) p.fallFade = 0.35;
 
-        const rowDots = p.pileRowDots;
-        const pileX = (p.pileCol - (rowDots - 1) / 2) * pileSpacingX;
-        const pileY = groundY - (p.numRows - 1 - p.pileRow) * pileSpacingY;
-
-        p._drawX = p.x + (pileX - p.x) * ease;
-        p._drawY = p.y + (pileY - p.y) * ease;
+        // Use pre-calculated pile positions with smooth interpolation
+        p._drawX = p.x + (p.pileX - p.x) * ease;
+        p._drawY = p.y + (p.pileY - p.y) * ease;
         p._drawZ = p.z;
       } else {
-        const rotY = Math.sin(t / 7000) * 0.5;
-        const rotX = Math.cos(t / 5000) * 0.5;
+        // Use cached rotation values for non-falling points
+        const rotY = Math.sin(t / 20000) * 0.5;
+        const rotX = Math.cos(t / 15000) * 0.5;
         const rx = p.x * Math.cos(rotY) - p.z * Math.sin(rotY);
         const rz = p.x * Math.sin(rotY) + p.z * Math.cos(rotY);
         const ry = p.y * Math.cos(rotX) - rz * Math.sin(rotX);
@@ -978,23 +980,28 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
       }
     });
 
+    // Smooth falling animation parameters (now using per-point variation)
     dots
       .attr("cx", d => d._drawX)
       .attr("cy", d => d._drawY)
       .attr("r", d => {
-        const baseR = 6.0;
+        const baseR = 6.0; // Increased from 4.5 to 6.0 for easier clicking
         const monthsLeft = d.lastMonthIndex - scrubMonth;
 
         if (
-          !d.hasFallen &&
+          !d.hasFallen && // Only pulse points that haven't fallen yet
           d.lastMonthIndex != null &&
           d.lastMonthIndex < 348 &&
           monthsLeft <= 3 &&
           monthsLeft >= 0
         ) {
-          const time = now / 800;
-          const raw = Math.sin(time + d.phase);
-          const eased = raw < 0 ? 1 + 0.3 * raw : 1;
+          // Slow inward pulse: 0.6x to 1x of base size, with easing
+          const t = now / 800; // Use cached 'now' for better performance
+          const raw = Math.sin(t + d.phase); // base wave
+          const eased = raw < 0
+            ? 1 + 0.3 * raw // Shrink to 70% and pause slightly at low
+            : 1;            // Hold full size when above baseline
+
           return baseR * eased;
         }
 
