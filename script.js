@@ -678,6 +678,16 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   const speed = 2;
   let offsetMonths = 0;
   let isPaused = false;
+  let pausedMonth = 0;
+  // Temporarily block external time sync (vizTime) after local interactions to prevent jumps
+  let allowTimeSync = true;
+  let _syncReenableTimer = null;
+  const SYNC_REENABLE_MS = 1500; // 1.5s cooldown after local actions
+  function temporarilyDisableSync() {
+    allowTimeSync = false;
+    if (_syncReenableTimer) clearTimeout(_syncReenableTimer);
+    _syncReenableTimer = setTimeout(() => { allowTimeSync = true; }, SYNC_REENABLE_MS);
+  }
 
   // --- SYNC HELPERS (localStorage across top/bottom windows) ---
   let lastBroadcastedMonth = null;
@@ -698,10 +708,29 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
     // Time sync
     if (e.key === "vizTime") {
-      if (isPaused || dragging) return; // do not move the scrubber while paused or dragging
+      if (isPaused || dragging || !allowTimeSync) return; // do not move while paused/dragging or during local cooldown
       const m = parseFloat(e.newValue);
       if (!isNaN(m) && m !== scrubMonth) {
         applySyncedTime(m);
+      }
+    }
+
+    // Global pause sync
+    if (e.key === "vizPaused") {
+      const wantPause = e.newValue === "1";
+      if (wantPause !== isPaused) {
+        isPaused = wantPause;
+        if (isPaused) {
+          playPauseBtn.classList.add("paused");
+          pausedMonth = scrubMonth;
+          lastResetTime = performance.now();
+          offsetMonths = pausedMonth; // lock timeline in place
+        } else {
+          playPauseBtn.classList.remove("paused");
+          lastResetTime = performance.now();
+          offsetMonths = scrubMonth;  // resume from same month
+          updateTimelineUI();
+        }
       }
     }
 
@@ -723,6 +752,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   // Timeline event handlers
   timelineTrack.addEventListener("mousedown", function (event) {
+    temporarilyDisableSync();
     dragging = true;
     isScrubbingManually = true;
     lastResetTime = performance.now();
@@ -740,6 +770,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
   document.addEventListener("mouseup", () => {
     if (dragging) {
+      temporarilyDisableSync();
       dragging = false;
       isScrubbingManually = false;
       const now = performance.now();
@@ -757,6 +788,7 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
 
     // Update offset to match the scrubbed position
     offsetMonths = scrubMonth;
+    temporarilyDisableSync();
     // Reset animation time to match scrubbed position
     animationStartTime = performance.now();
     pausedTime = 0;
@@ -826,29 +858,38 @@ d3.csv("Grouped_Music_Dataset.csv").then(data => {
   endDateLabel.textContent = getTimeLabel(totalMonths - 1);
   updateTimelineUI();
 
+  // Adopt global paused state if another window set it
+  const pausedFlag = localStorage.getItem("vizPaused");
+  if (pausedFlag === "1") {
+    isPaused = true;
+    playPauseBtn.classList.add("paused");
+    pausedMonth = scrubMonth;
+    lastResetTime = performance.now();
+    offsetMonths = pausedMonth; // lock time in place while paused
+  }
+
   // Play/Pause button functionality
   playPauseBtn.addEventListener("click", () => {
+    temporarilyDisableSync();
     const nowTs = performance.now();
-    isPaused = !isPaused;
-
-    if (isPaused) {
-      // Entering pause: remember when we paused so we can offset master time on resume
+    if (!isPaused) {
+      // Entering pause: lock to the current month and broadcast global pause
+      isPaused = true;
       playPauseBtn.classList.add("paused");
+      pausedMonth = scrubMonth;           // remember exact month
       lastPauseTime = nowTs;
+      lastResetTime = nowTs;              // re-anchor clock so time math stays stable
+      offsetMonths = pausedMonth;         // hold time constant while paused
+      localStorage.setItem("vizPaused", "1");
+      updateTimelineUI();
     } else {
-      // Leaving pause: shift the master clock forward by the paused duration
-      // so that (now - lastResetTime) ignores time spent paused.
+      // Leaving pause: resume from exactly where we paused (no jump)
+      isPaused = false;
       playPauseBtn.classList.remove("paused");
-      if (lastPauseTime != null) {
-        const pausedDuration = nowTs - lastPauseTime;
-        // Advance lastResetTime by the paused duration to "freeze" elapsed time
-        lastResetTime += pausedDuration;
-        lastPauseTime = null;
-      }
-
-      // Also ensure the scrubber reflects the current logical time immediately
-      // without a jump due to any pending CSS transition.
-      // (No month change here; we only refresh UI positioning.)
+      lastPauseTime = null;
+      lastResetTime = nowTs;              // start fresh from "now"
+      offsetMonths = scrubMonth;          // continue from the current scrub position
+      localStorage.setItem("vizPaused", "0");
       updateTimelineUI();
     }
   });
